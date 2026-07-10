@@ -1,6 +1,13 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'node:path'
-import { existsSync, mkdirSync, createWriteStream, type WriteStream } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  createWriteStream,
+  readFileSync,
+  writeFileSync,
+  type WriteStream,
+} from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { Command, ConfigFile } from '@codehamr-ui/protocol'
@@ -45,6 +52,53 @@ function resolveBinary(): string {
   return exe // rely on PATH
 }
 
+// ---------------------------------------------------------------------------
+// Config presets: named endpoint configs stored app-globally (userData), so
+// one saved setup follows the user across every project. The one marked
+// default seeds .codehamr/config.yaml in brand-new project folders.
+// ---------------------------------------------------------------------------
+
+interface PresetStore {
+  defaultPreset?: string
+  presets: Record<string, ConfigFile>
+}
+
+const presetsPath = (): string => join(app.getPath('userData'), 'presets.json')
+
+function readPresets(): PresetStore {
+  try {
+    const raw = JSON.parse(readFileSync(presetsPath(), 'utf8')) as {
+      defaultPreset?: unknown
+      presets?: Record<string, unknown>
+    }
+    const presets: Record<string, ConfigFile> = {}
+    for (const [name, value] of Object.entries(raw.presets ?? {})) {
+      const parsed = ConfigFile.safeParse(value)
+      if (parsed.success) presets[name] = parsed.data
+    }
+    const def = typeof raw.defaultPreset === 'string' && presets[raw.defaultPreset]
+      ? raw.defaultPreset
+      : undefined
+    return { defaultPreset: def, presets }
+  } catch {
+    return { presets: {} }
+  }
+}
+
+function writePresets(store: PresetStore): void {
+  writeFileSync(presetsPath(), JSON.stringify(store, null, 2), 'utf8')
+}
+
+const CONFIG_HEADER =
+  '# codehamr configuration — edited via CodeHamr UI\n' +
+  '# key: ${MY_KEY} expands the env var at runtime, keeping secrets off disk.\n\n'
+
+async function writeConfigFile(cwd: string, cfg: ConfigFile): Promise<void> {
+  const dir = join(cwd, '.codehamr')
+  mkdirSync(dir, { recursive: true })
+  await writeFile(join(dir, 'config.yaml'), CONFIG_HEADER + stringifyYaml(cfg), 'utf8')
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -80,6 +134,18 @@ function wireIpc(): void {
   ipcMain.handle('agent:start', async (_evt, cwd: string) => {
     session?.stop()
     openCrashLog(cwd)
+    // Brand-new project: seed config.yaml from the default preset (if any)
+    // before the agent bootstraps, so a fresh folder starts with the user's
+    // endpoints instead of the stock template.
+    let seededFrom: string | null = null
+    if (!existsSync(join(cwd, '.codehamr', 'config.yaml'))) {
+      const store = readPresets()
+      const def = store.defaultPreset ? store.presets[store.defaultPreset] : undefined
+      if (def) {
+        await writeConfigFile(cwd, def)
+        seededFrom = store.defaultPreset!
+      }
+    }
     session = new AgentSession({
       binaryPath: resolveBinary(),
       cwd,
@@ -97,7 +163,7 @@ function wireIpc(): void {
       },
     })
     session.start()
-    return session.running
+    return { running: session.running, seededFrom }
   })
 
   ipcMain.handle('agent:send', async (_evt, raw: unknown) => {
@@ -146,14 +212,38 @@ function wireIpc(): void {
     if (!cfg.models[cfg.active]) {
       throw new Error(`active profile "${cfg.active}" does not exist`)
     }
-    const header =
-      '# codehamr configuration — edited via CodeHamr UI\n' +
-      '# key: ${MY_KEY} expands the env var at runtime, keeping secrets off disk.\n\n'
-    await writeFile(
-      join(cwd, '.codehamr', 'config.yaml'),
-      header + stringifyYaml(cfg),
-      'utf8',
-    )
+    await writeConfigFile(cwd, cfg)
+  })
+
+  ipcMain.handle('presets:list', async () => {
+    const store = readPresets()
+    return { defaultPreset: store.defaultPreset ?? null, presets: store.presets }
+  })
+
+  ipcMain.handle(
+    'presets:save',
+    async (_evt, name: string, raw: unknown, setDefault: boolean) => {
+      const trimmed = String(name).trim()
+      if (!trimmed) throw new Error('preset name is required')
+      const cfg = ConfigFile.parse(raw)
+      const store = readPresets()
+      store.presets[trimmed] = cfg
+      if (setDefault) store.defaultPreset = trimmed
+      writePresets(store)
+    },
+  )
+
+  ipcMain.handle('presets:delete', async (_evt, name: string) => {
+    const store = readPresets()
+    delete store.presets[name]
+    if (store.defaultPreset === name) store.defaultPreset = undefined
+    writePresets(store)
+  })
+
+  ipcMain.handle('presets:setDefault', async (_evt, name: string | null) => {
+    const store = readPresets()
+    store.defaultPreset = name !== null && store.presets[name] ? name : undefined
+    writePresets(store)
   })
 }
 

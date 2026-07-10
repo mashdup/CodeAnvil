@@ -30,6 +30,23 @@ export function SettingsPanel({
   const [active, setActive] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [presets, setPresets] = useState<Record<string, ConfigFile>>({})
+  const [defaultPreset, setDefaultPreset] = useState<string | null>(null)
+  const [selectedPreset, setSelectedPreset] = useState('')
+  const [presetName, setPresetName] = useState('')
+
+  const configToForm = (cfg: ConfigFile): void => {
+    setActive(cfg.active)
+    setRows(
+      Object.entries(cfg.models).map(([name, p]) => ({
+        name,
+        llm: p.llm,
+        url: p.url,
+        key: p.key ?? '',
+        contextSize: p.context_size ? String(p.context_size) : '',
+      })),
+    )
+  }
 
   useEffect(() => {
     void window.codehamr.readConfig(workspace).then((cfg) => {
@@ -38,16 +55,11 @@ export function SettingsPanel({
         setRows([])
         return
       }
-      setActive(cfg.active)
-      setRows(
-        Object.entries(cfg.models).map(([name, p]) => ({
-          name,
-          llm: p.llm,
-          url: p.url,
-          key: p.key ?? '',
-          contextSize: p.context_size ? String(p.context_size) : '',
-        })),
-      )
+      configToForm(cfg)
+    })
+    void window.codehamr.listPresets().then((store) => {
+      setPresets(store.presets)
+      setDefaultPreset(store.defaultPreset)
     })
   }, [workspace])
 
@@ -66,34 +78,83 @@ export function SettingsPanel({
     setRows((prev) => prev!.filter((_, idx) => idx !== i))
   }
 
-  const save = async (): Promise<void> => {
-    if (!rows) return
-    setError('')
-    // Fold rows back into the config map with light validation.
+  /** Fold the form rows back into a validated config, or set error and return null. */
+  const buildConfig = (): ConfigFile | null => {
+    if (!rows) return null
     const models: ConfigFile['models'] = {}
     for (const r of rows) {
       const name = r.name.trim()
-      if (!name) return setError('every profile needs a name')
-      if (models[name]) return setError(`duplicate profile name "${name}"`)
-      if (!r.llm.trim() || !r.url.trim()) return setError(`profile "${name}": llm and url are required`)
+      if (!name) return setError('every profile needs a name'), null
+      if (models[name]) return setError(`duplicate profile name "${name}"`), null
+      if (!r.llm.trim() || !r.url.trim())
+        return setError(`profile "${name}": llm and url are required`), null
       const ctx = r.contextSize.trim() === '' ? undefined : Number(r.contextSize)
       if (ctx !== undefined && (!Number.isInteger(ctx) || ctx <= 0)) {
-        return setError(`profile "${name}": context size must be a positive integer (or empty)`)
+        return setError(`profile "${name}": context size must be a positive integer (or empty)`), null
       }
       models[name] = { llm: r.llm.trim(), url: r.url.trim().replace(/\/+$/, ''), key: r.key, context_size: ctx }
     }
-    if (Object.keys(models).length === 0) return setError('at least one profile is required')
-    const activeName = models[active] ? active : Object.keys(models)[0]
+    if (Object.keys(models).length === 0) return setError('at least one profile is required'), null
+    return { active: models[active] ? active : Object.keys(models)[0], models }
+  }
 
+  const save = async (): Promise<void> => {
+    setError('')
+    const cfg = buildConfig()
+    if (!cfg) return
     setSaving(true)
     try {
-      await window.codehamr.writeConfig(workspace, { active: activeName, models })
+      await window.codehamr.writeConfig(workspace, cfg)
       onSaved() // caller restarts the agent so the config is live
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
+  }
+
+  const applyPreset = (name: string): void => {
+    setSelectedPreset(name)
+    const cfg = presets[name]
+    if (cfg) {
+      configToForm(cfg)
+      setError('')
+    }
+  }
+
+  const saveAsPreset = async (): Promise<void> => {
+    setError('')
+    const name = presetName.trim()
+    if (!name) return setError('give the preset a name first')
+    const cfg = buildConfig()
+    if (!cfg) return
+    // First preset ever becomes the default automatically — that's the
+    // "just work on my next project" path.
+    const makeDefault = Object.keys(presets).length === 0
+    await window.codehamr.savePreset(name, cfg, makeDefault)
+    setPresets((prev) => ({ ...prev, [name]: cfg }))
+    if (makeDefault) setDefaultPreset(name)
+    setSelectedPreset(name)
+    setPresetName('')
+  }
+
+  const deleteSelected = async (): Promise<void> => {
+    if (!selectedPreset) return
+    await window.codehamr.deletePreset(selectedPreset)
+    setPresets((prev) => {
+      const next = { ...prev }
+      delete next[selectedPreset]
+      return next
+    })
+    if (defaultPreset === selectedPreset) setDefaultPreset(null)
+    setSelectedPreset('')
+  }
+
+  const toggleDefault = async (): Promise<void> => {
+    if (!selectedPreset) return
+    const next = defaultPreset === selectedPreset ? null : selectedPreset
+    await window.codehamr.setDefaultPreset(next)
+    setDefaultPreset(next)
   }
 
   return (
@@ -111,11 +172,62 @@ export function SettingsPanel({
             ✕
           </button>
         </div>
-        <p className="mb-4 text-xs text-zinc-500">
+        <p className="mb-3 text-xs text-zinc-500">
           Tip: set <code className="rounded bg-zinc-800 px-1">key</code> to{' '}
           <code className="rounded bg-zinc-800 px-1">{'${MY_ENV_VAR}'}</code> to read the secret from
           the environment instead of storing it on disk. Saving restarts the agent.
         </p>
+
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded border border-zinc-800 bg-zinc-950/50 p-2">
+          <span className="text-xs text-zinc-400">Presets</span>
+          <select
+            value={selectedPreset}
+            onChange={(e) => applyPreset(e.target.value)}
+            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs outline-none"
+          >
+            <option value="">load a saved config…</option>
+            {Object.keys(presets)
+              .sort()
+              .map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                  {defaultPreset === name ? ' ★' : ''}
+                </option>
+              ))}
+          </select>
+          {selectedPreset && (
+            <>
+              <label className="flex items-center gap-1 text-xs text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={defaultPreset === selectedPreset}
+                  onChange={() => void toggleDefault()}
+                />
+                default for new projects
+              </label>
+              <button
+                onClick={() => void deleteSelected()}
+                className="rounded px-2 py-0.5 text-xs text-red-400 hover:bg-red-950"
+              >
+                delete
+              </button>
+            </>
+          )}
+          <span className="mx-1 h-4 w-px bg-zinc-700" />
+          <input
+            value={presetName}
+            onChange={(e) => setPresetName(e.target.value)}
+            placeholder="save current as…"
+            className="w-36 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs outline-none focus:border-zinc-500"
+          />
+          <button
+            onClick={() => void saveAsPreset()}
+            disabled={presetName.trim() === '' || rows === null || rows.length === 0}
+            className="rounded bg-zinc-800 px-2 py-1 text-xs hover:bg-zinc-700 disabled:opacity-40"
+          >
+            save preset
+          </button>
+        </div>
 
         {rows === null ? (
           <p className="py-8 text-center text-sm text-zinc-500">Loading…</p>

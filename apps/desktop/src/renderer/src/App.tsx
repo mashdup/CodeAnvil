@@ -270,7 +270,15 @@ export default function App(): React.JSX.Element {
       setItems(saved.map((it) => ('streaming' in it ? { ...it, streaming: false } : it)))
     }
     loadedRef.current = true
-    await window.codehamr.startAgent(dir)
+    const { seededFrom } = await window.codehamr.startAgent(dir)
+    if (seededFrom) {
+      push({
+        kind: 'notice',
+        id: uid(),
+        text: `new project — endpoints configured from your "${seededFrom}" preset`,
+        tone: 'info',
+      })
+    }
   }
 
   // Debounced transcript autosave; gated on loadedRef so the initial empty

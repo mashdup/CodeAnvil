@@ -6,10 +6,18 @@ const api = {
   readConfig: (cwd: string): Promise<ConfigFile | null> => ipcRenderer.invoke('config:read', cwd),
   writeConfig: (cwd: string, cfg: ConfigFile): Promise<void> =>
     ipcRenderer.invoke('config:write', cwd, cfg),
+  listPresets: (): Promise<{ defaultPreset: string | null; presets: Record<string, ConfigFile> }> =>
+    ipcRenderer.invoke('presets:list'),
+  savePreset: (name: string, cfg: ConfigFile, setDefault: boolean): Promise<void> =>
+    ipcRenderer.invoke('presets:save', name, cfg, setDefault),
+  deletePreset: (name: string): Promise<void> => ipcRenderer.invoke('presets:delete', name),
+  setDefaultPreset: (name: string | null): Promise<void> =>
+    ipcRenderer.invoke('presets:setDefault', name),
   readTranscript: (cwd: string): Promise<unknown> => ipcRenderer.invoke('transcript:read', cwd),
   writeTranscript: (cwd: string, items: unknown): Promise<void> =>
     ipcRenderer.invoke('transcript:write', cwd, items),
-  startAgent: (cwd: string): Promise<boolean> => ipcRenderer.invoke('agent:start', cwd),
+  startAgent: (cwd: string): Promise<{ running: boolean; seededFrom: string | null }> =>
+    ipcRenderer.invoke('agent:start', cwd),
   stopAgent: (): Promise<void> => ipcRenderer.invoke('agent:stop'),
   send: (cmd: Command): Promise<void> => ipcRenderer.invoke('agent:send', cmd),
   onEvent: (cb: (event: AgentEvent) => void): (() => void) => {
