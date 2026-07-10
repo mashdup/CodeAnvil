@@ -135,7 +135,13 @@ function Body({ preview }: { preview: Preview }): React.JSX.Element {
   }
 }
 
-/** Syntax-highlighted code, falling back to plain text for unknown types. */
+/**
+ * Syntax-highlighted code with a line-number gutter, falling back to plain
+ * text for unknown types. The gutter is a separate column of newline-joined
+ * numbers rather than per-line wrapping, so highlight.js spans (which can
+ * legally cross newlines, e.g. block comments) stay intact and every source
+ * line still maps 1:1 to a gutter number.
+ */
 function CodeView({ content, path }: { content: string; path: string }): React.JSX.Element {
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
   const lang = EXT_LANG[ext]
@@ -150,14 +156,24 @@ function CodeView({ content, path }: { content: string; path: string }): React.J
     return null
   }, [content, lang])
 
+  const gutter = useMemo(() => {
+    const n = content.split('\n').length
+    return Array.from({ length: n }, (_, i) => i + 1).join('\n')
+  }, [content])
+
   return (
-    <pre className="overflow-auto px-3 py-2 font-mono text-xs leading-5">
-      {html ? (
-        <code className="hljs !bg-transparent" dangerouslySetInnerHTML={{ __html: html }} />
-      ) : (
-        <code className="whitespace-pre text-zinc-300">{content}</code>
-      )}
-    </pre>
+    <div className="flex font-mono text-xs leading-5">
+      <pre className="sticky left-0 shrink-0 border-r border-zinc-800 bg-zinc-950/60 px-3 py-2 text-right text-zinc-600 select-none">
+        {gutter}
+      </pre>
+      <pre className="flex-1 overflow-x-auto px-3 py-2">
+        {html ? (
+          <code className="hljs !bg-transparent" dangerouslySetInnerHTML={{ __html: html }} />
+        ) : (
+          <code className="whitespace-pre text-zinc-300">{content}</code>
+        )}
+      </pre>
+    </div>
   )
 }
 
