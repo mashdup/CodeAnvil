@@ -5,7 +5,7 @@
 > config/model manager. Think "Claude Desktop / Cursor experience" on top of the
 > minimal `codehamr` Go agent.
 
-Status: **M0–M5 complete · M6 (packaging) next** · Updated: 2026-07-10
+Status: **Phase 1 (M0–M6) complete · Phase 2 started at P1 (CI + releases)** · Updated: 2026-07-10
 
 **Locked decisions:** target **Windows + macOS**; started at **M2** (skipped
 the M1 spike); fork lives at `git@github.com:mashdup/codehamr.git`, wired in
@@ -257,6 +257,21 @@ renderer). All protocol events/commands flow through it.
 | **M6** | Packaging | ✅ **Windows done, macOS config ready** — `npm run dist:win` produces a signed-metadata NSIS installer (`apps/desktop/release/CodeHamr UI Setup 0.1.0.exe`, ~97MB) with the `nogreenteagc` agent bundled at `resources/agent/` (resolveBinary prefers it when packaged); generated hammer app icon; `dist:mac` config present — run on a Mac to produce the dmg. *Deferred: real code signing (needs certs), auto-update (needs publish infra), multi-workspace tabs, vision-model live test.* | ~1 week |
 
 M1 and M2 can overlap; M1 is intentionally disposable once M2 lands.
+
+### Phase 2 (post-roadmap)
+
+| # | Milestone | Outcome | Status |
+|---|-----------|---------|--------|
+| **P1** | CI + releases | GitHub Actions: Go tests + typecheck + build on every push; on `v*` tag, build the Windows NSIS installer **and the macOS dmg (macos runner — no Mac needed)** and publish both to a GitHub Release. Prerequisite for auto-update. | ⏳ in progress |
+| **P2** | Live validation *(user-owned)* | Install the packaged app and use it on a real project; vision test — pull a multimodal model (e.g. `qwen3-vl`), drop a screenshot, confirm the image path end-to-end. | pending |
+| **P3** | Workspace explorer | File tree + read-only file viewer pane beside the chat; highlight files the agent touched, click a diff to open the file. | pending |
+| **P4** | Multi-workspace tabs | Several projects open at once, one agent process per tab. | pending |
+| **P5** | UX polish | Queue a prompt while a turn runs, transcript search, keyboard shortcuts. | pending |
+| **P6** | Signing + auto-update | Code-signing cert (Windows SmartScreen / macOS notarization), electron-updater fed by the P1 GitHub Releases. Costs money; needs no code groundwork beyond P1. | pending |
+
+macOS note: release dmg targets **arm64 only** for now — the agent binary is
+built on the runner for its host arch; an x64 (Intel) dmg needs a second Go
+cross-build wired into extraResources, deferred until someone asks.
 
 ---
 

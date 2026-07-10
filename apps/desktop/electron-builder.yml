@@ -31,14 +31,26 @@ nsis:
   perMachine: false
   deleteAppDataOnUninstall: false
 
-# macOS: config ready; produce artifacts on a Mac (cross-building a dmg from
-# Windows is not supported). Unsigned until certs exist (see PLAN.md M6).
+# macOS: built by the release workflow on a macos (arm64) runner. arm64 only:
+# the agent binary is compiled on the runner for its host arch; an Intel dmg
+# needs a second Go cross-build first (PLAN.md Phase 2 note). Unsigned until
+# certs exist. zip target included because electron-updater on macOS requires
+# it (future P6).
 mac:
   icon: build/icon.png
   category: public.app-category.developer-tools
   target:
     - target: dmg
-      arch: [arm64, x64]
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
   extraResources:
     - from: ../../codehamr/dist/codehamr
       to: agent/codehamr
+
+# Where releases land; also baked into the app for a future electron-updater
+# (P6). CI publishes on v* tags with GH_TOKEN; local builds never publish.
+publish:
+  provider: github
+  owner: mashdup
+  repo: CodeHamrUI

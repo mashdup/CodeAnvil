@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Full fork test suite on Linux — the platform upstream's own CI targets.
+  agent-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: codehamr/go.sum
+      - name: vet
+        run: go vet ./...
+        working-directory: codehamr
+      - name: test
+        run: go test ./...
+        working-directory: codehamr
+
+  # Windows: only the packages this harness depends on and that are
+  # Windows-clean. Upstream's tui/update tests assert unix file perms and
+  # fail on NTFS by design — not our surface.
+  agent-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: codehamr/go.sum
+      - name: test protocol + tools
+        run: go test ./internal/protocol/ ./internal/tools/
+        working-directory: codehamr
+
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build

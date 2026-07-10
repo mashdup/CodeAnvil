@@ -1,0 +1,65 @@
+name: Release
+
+# Tag v* (matching apps/desktop/package.json's version, e.g. v0.1.0) to build
+# installers with the bundled agent and publish them to a GitHub Release.
+# electron-builder's github publisher creates/updates a draft release for the
+# tag; review and publish it from the Releases page.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: codehamr/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: build agent (GOEXPERIMENT=nogreenteagc)
+        run: npm run agent:build
+      - name: build app
+        run: npm run build
+      - name: package + publish NSIS installer
+        run: npx electron-builder --win --publish always
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  macos:
+    runs-on: macos-latest # arm64; dmg targets arm64 (see electron-builder.yml)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: codehamr/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: build agent (GOEXPERIMENT=nogreenteagc)
+        run: npm run agent:build
+      - name: build app
+        run: npm run build
+      - name: package + publish dmg
+        run: npx electron-builder --mac --publish always
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Unsigned build until certs exist (P6): skip signing discovery.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
