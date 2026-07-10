@@ -970,7 +970,7 @@ export default function Workspace({
           <>
             <aside
               style={{ width: treeWidth }}
-              className="shrink-0 overflow-y-auto border-r border-zinc-800"
+              className="shrink-0 overflow-hidden border-r border-zinc-800"
             >
               <FileTree
                 root={cwd}

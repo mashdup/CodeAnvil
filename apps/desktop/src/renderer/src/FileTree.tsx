@@ -1,18 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 /**
- * FileTree: lazy directory tree for the open workspace. Directories load on
- * first expand (never a full recursive walk — node_modules stays cheap).
- * `touched` paths (files the agent wrote/edited this session) get an emerald
- * dot. `reload` carries the specific directories that changed on disk; only
- * those that are currently loaded are re-fetched — reloading the whole loaded
- * tree on every change froze the panel once node_modules was expanded.
+ * FileTree: lazy, virtualized directory tree for the open workspace.
+ * Directories load on first expand (never a full recursive walk). The visible
+ * subtree is flattened and windowed — only rows in the viewport render — so a
+ * fully-expanded node_modules (thousands of rows) stays smooth. `touched`
+ * paths get an emerald dot; `reload` re-fetches only the loaded directories
+ * that changed on disk.
  */
 
 interface Entry {
   name: string
   path: string
   isDir: boolean
+}
+
+interface FlatNode {
+  entry: Entry
+  depth: number
+}
+
+const ROW_H = 22 // px; fixed so the virtualizer can map scroll → index
+const OVERSCAN = 10
+
+/** Depth-first flatten of the currently-visible (loaded + expanded) subtree. */
+function flatten(
+  root: string,
+  children: Record<string, Entry[]>,
+  expanded: Set<string>,
+): FlatNode[] {
+  const out: FlatNode[] = []
+  const walk = (dir: string, depth: number): void => {
+    const entries = children[dir]
+    if (!entries) return
+    for (const e of entries) {
+      out.push({ entry: e, depth })
+      if (e.isDir && expanded.has(e.path)) walk(e.path, depth + 1)
+    }
+  }
+  walk(root, 0)
+  return out
 }
 
 export function FileTree({
@@ -83,43 +110,78 @@ export function FileTree({
     })
   }
 
-  const renderDir = (dir: string, depth: number): React.JSX.Element[] => {
-    const entries = children[dir] ?? []
-    return entries.flatMap((e) => {
-      const pad = { paddingLeft: `${depth * 14 + 6}px` }
-      if (e.isDir) {
-        const open = expanded.has(e.path)
-        return [
-          <button
-            key={e.path}
-            onClick={() => toggle(e.path)}
-            style={pad}
-            className="flex w-full items-center gap-1 truncate py-0.5 text-left text-zinc-400 hover:bg-zinc-800/60"
-          >
-            <span className="w-3 shrink-0 text-[10px]">{open ? '▾' : '▸'}</span>
-            <span className="truncate">{e.name}</span>
-          </button>,
-          ...(open ? renderDir(e.path, depth + 1) : []),
-        ]
-      }
-      const isTouched = touched.has(e.path.toLowerCase())
-      return [
-        <button
-          key={e.path}
-          onClick={() => onOpen(e.path)}
-          style={pad}
-          className="flex w-full items-center gap-1 truncate py-0.5 text-left text-zinc-300 hover:bg-zinc-800/60"
-          title={e.path}
-        >
-          <span className="w-3 shrink-0" />
-          <span className="truncate">{e.name}</span>
-          {isTouched && (
-            <span className="ml-auto mr-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" title="edited by the agent this session" />
-          )}
-        </button>,
-      ]
-    })
-  }
+  // Flattened visible rows + viewport windowing.
+  const rows = useMemo(() => flatten(root, children, expanded), [root, children, expanded])
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportH, setViewportH] = useState(600)
 
-  return <div className="py-1 font-mono text-xs">{renderDir(root, 0)}</div>
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const measure = (): void => setViewportH(el.clientHeight)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
+  const end = Math.min(rows.length, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN)
+  const visible = rows.slice(start, end)
+
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+      className="h-full overflow-auto py-1 font-mono text-xs"
+    >
+      <div style={{ height: rows.length * ROW_H, position: 'relative' }}>
+        {visible.map(({ entry, depth }, i) => {
+          const idx = start + i
+          const style: React.CSSProperties = {
+            position: 'absolute',
+            top: idx * ROW_H,
+            left: 0,
+            right: 0,
+            height: ROW_H,
+            paddingLeft: depth * 14 + 6,
+          }
+          if (entry.isDir) {
+            const open = expanded.has(entry.path)
+            return (
+              <button
+                key={entry.path}
+                onClick={() => toggle(entry.path)}
+                style={style}
+                className="flex items-center gap-1 text-left text-zinc-400 hover:bg-zinc-800/60"
+              >
+                <span className="w-3 shrink-0 text-[10px]">{open ? '▾' : '▸'}</span>
+                <span className="truncate">{entry.name}</span>
+              </button>
+            )
+          }
+          const isTouched = touched.has(entry.path.toLowerCase())
+          return (
+            <button
+              key={entry.path}
+              onClick={() => onOpen(entry.path)}
+              style={style}
+              title={entry.path}
+              className="flex items-center gap-1 text-left text-zinc-300 hover:bg-zinc-800/60"
+            >
+              <span className="w-3 shrink-0" />
+              <span className="truncate">{entry.name}</span>
+              {isTouched && (
+                <span
+                  className="ml-auto mr-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"
+                  title="edited by the agent this session"
+                />
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
