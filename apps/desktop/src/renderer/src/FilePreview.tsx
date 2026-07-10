@@ -1,9 +1,61 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import mammoth from 'mammoth'
+import hljs from 'highlight.js/lib/core'
+import 'highlight.js/styles/github-dark.css'
+// Curated language set — covers the vast majority of files without pulling
+// highlight.js's full ~200-language bundle.
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import json from 'highlight.js/lib/languages/json'
+import python from 'highlight.js/lib/languages/python'
+import go from 'highlight.js/lib/languages/go'
+import rust from 'highlight.js/lib/languages/rust'
+import java from 'highlight.js/lib/languages/java'
+import c from 'highlight.js/lib/languages/c'
+import cpp from 'highlight.js/lib/languages/cpp'
+import csharp from 'highlight.js/lib/languages/csharp'
+import bash from 'highlight.js/lib/languages/bash'
+import yaml from 'highlight.js/lib/languages/yaml'
+import ini from 'highlight.js/lib/languages/ini'
+import xml from 'highlight.js/lib/languages/xml'
+import css from 'highlight.js/lib/languages/css'
+import scss from 'highlight.js/lib/languages/scss'
+import sql from 'highlight.js/lib/languages/sql'
+import ruby from 'highlight.js/lib/languages/ruby'
+import php from 'highlight.js/lib/languages/php'
+import markdownLang from 'highlight.js/lib/languages/markdown'
+import dockerfile from 'highlight.js/lib/languages/dockerfile'
+import kotlin from 'highlight.js/lib/languages/kotlin'
+import swift from 'highlight.js/lib/languages/swift'
+
+for (const [name, lang] of [
+  ['javascript', javascript], ['typescript', typescript], ['json', json],
+  ['python', python], ['go', go], ['rust', rust], ['java', java], ['c', c],
+  ['cpp', cpp], ['csharp', csharp], ['bash', bash], ['yaml', yaml], ['ini', ini],
+  ['xml', xml], ['css', css], ['scss', scss], ['sql', sql], ['ruby', ruby],
+  ['php', php], ['markdown', markdownLang], ['dockerfile', dockerfile],
+  ['kotlin', kotlin], ['swift', swift],
+] as const) {
+  hljs.registerLanguage(name, lang)
+}
+
+// File extension → highlight.js language id.
+const EXT_LANG: Record<string, string> = {
+  js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+  ts: 'typescript', tsx: 'typescript', json: 'json', jsonc: 'json',
+  py: 'python', go: 'go', rs: 'rust', java: 'java', c: 'c', h: 'c',
+  cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp', cs: 'csharp',
+  sh: 'bash', bash: 'bash', zsh: 'bash', yml: 'yaml', yaml: 'yaml',
+  toml: 'ini', ini: 'ini', cfg: 'ini', conf: 'ini',
+  html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml', vue: 'xml',
+  css: 'css', scss: 'scss', sass: 'scss', sql: 'sql', rb: 'ruby',
+  php: 'php', md: 'markdown', markdown: 'markdown', dockerfile: 'dockerfile',
+  kt: 'kotlin', kts: 'kotlin', swift: 'swift',
+}
 
 // Bundled worker (no network — the strict CSP forbids external fetches).
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -57,11 +109,7 @@ export function FilePreview({
 function Body({ preview }: { preview: Preview }): React.JSX.Element {
   switch (preview.kind) {
     case 'text':
-      return (
-        <pre className="px-3 py-2 font-mono text-xs leading-5 whitespace-pre text-zinc-300">
-          {preview.content}
-        </pre>
-      )
+      return <CodeView content={preview.content} path={preview.path} />
     case 'markdown':
       return (
         <div className="markdown px-4 py-3 text-sm text-zinc-200">
@@ -85,6 +133,32 @@ function Body({ preview }: { preview: Preview }): React.JSX.Element {
     case 'unsupported':
       return <p className="p-6 text-center text-sm text-zinc-500">{preview.note}</p>
   }
+}
+
+/** Syntax-highlighted code, falling back to plain text for unknown types. */
+function CodeView({ content, path }: { content: string; path: string }): React.JSX.Element {
+  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  const lang = EXT_LANG[ext]
+  const html = useMemo(() => {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return hljs.highlight(content, { language: lang }).value
+      } catch {
+        /* fall through to plain */
+      }
+    }
+    return null
+  }, [content, lang])
+
+  return (
+    <pre className="overflow-auto px-3 py-2 font-mono text-xs leading-5">
+      {html ? (
+        <code className="hljs !bg-transparent" dangerouslySetInnerHTML={{ __html: html }} />
+      ) : (
+        <code className="whitespace-pre text-zinc-300">{content}</code>
+      )}
+    </pre>
+  )
 }
 
 /** Renders each PDF page to a canvas via the bundled pdf.js. */

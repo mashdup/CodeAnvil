@@ -431,6 +431,27 @@ function wireIpc(): void {
   }
   const MD_EXTS = new Set(['md', 'markdown', 'mdx'])
 
+  // Decode a file to text, handling the common non-UTF-8 cases rather than
+  // rendering U+FFFD. Returns null for genuine binary. BOM detection runs
+  // first: UTF-16 text is full of NUL bytes and would otherwise trip the
+  // binary heuristic below.
+  const decodeText = (buf: Buffer): string | null => {
+    if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf)
+      return buf.subarray(3).toString('utf8')
+    if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe)
+      return new TextDecoder('utf-16le').decode(buf.subarray(2))
+    if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff)
+      return new TextDecoder('utf-16be').decode(buf.subarray(2))
+    if (buf.subarray(0, 8192).includes(0)) return null // no BOM + NUL = binary
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(buf)
+    } catch {
+      // Invalid UTF-8 → legacy Windows-1252, the usual source of a lone
+      // en-dash or smart-quote showing up as U+FFFD ("Engineer – Mobile").
+      return new TextDecoder('windows-1252').decode(buf)
+    }
+  }
+
   ipcMain.handle('preview:read', async (_evt, root: string, file: string) => {
     const abs = insideWorkspace(root, file)
     const info = await stat(abs)
@@ -453,14 +474,21 @@ function wireIpc(): void {
 
     // Everything else: try as text.
     if (info.size > TEXT_CAP * 8) return { kind: 'too-large', size: info.size }
-    const buf = await readFile(abs)
-    if (buf.subarray(0, 8192).includes(0)) return { kind: 'binary', size: info.size }
-    return {
-      kind: MD_EXTS.has(ext) ? 'markdown' : 'text',
-      content: buf.subarray(0, TEXT_CAP).toString('utf8'),
-      truncated: buf.length > TEXT_CAP,
-      size: info.size,
+    const decoded = decodeText(await readFile(abs))
+    if (decoded === null) return { kind: 'binary', size: info.size }
+    const truncated = decoded.length > TEXT_CAP
+    let content = truncated ? decoded.slice(0, TEXT_CAP) : decoded
+    if (MD_EXTS.has(ext)) return { kind: 'markdown', content, truncated, size: info.size }
+    // Pretty-print JSON so minified files are actually readable. Skipped when
+    // truncated (the tail is cut, so it won't parse).
+    if (ext === 'json' && !truncated) {
+      try {
+        content = JSON.stringify(JSON.parse(content), null, 2)
+      } catch {
+        /* not valid JSON — show it raw */
+      }
     }
+    return { kind: 'text', content, truncated, size: info.size }
   })
 
   // -------------------------------------------------------------------------
