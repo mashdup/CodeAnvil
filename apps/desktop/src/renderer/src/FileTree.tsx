@@ -34,13 +34,19 @@ export function FileTree({
   const [dir, setDir] = useState(root)
   const [entries, setEntries] = useState<Entry[]>([])
 
+  // Guards against out-of-order navigation: a slow listing of a folder we've
+  // already left must not overwrite the current one's contents.
+  const reqRef = useRef(0)
   const load = useCallback(
     async (d: string): Promise<void> => {
+      const token = ++reqRef.current
+      let result: Entry[]
       try {
-        setEntries(await window.codehamr.listDir(root, d))
+        result = await window.codehamr.listDir(root, d)
       } catch {
-        setEntries([])
+        result = []
       }
+      if (token === reqRef.current) setEntries(result)
     },
     [root],
   )
@@ -122,9 +128,9 @@ export function FileTree({
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         className="flex-1 overflow-auto py-1"
       >
-        {entries.length === 0 && (
-          <p className="px-3 py-2 text-zinc-600">empty folder</p>
-        )}
+        {entries.length === 0 && <p className="px-3 py-2 text-zinc-600">empty folder</p>}
+        {/* key by dir so rows fully remount on navigation — no stale reuse. */}
+        <div key={dir}>
         <div style={{ height: start * ROW_H }} />
         {visible.map((entry) =>
           entry.isDir ? (
@@ -158,6 +164,7 @@ export function FileTree({
           ),
         )}
         <div style={{ height: (entries.length - end) * ROW_H }} />
+        </div>
       </div>
     </div>
   )
