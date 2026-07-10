@@ -12,6 +12,9 @@ const basename = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?
 export default function App(): React.JSX.Element {
   const [tabs, setTabs] = useState<string[]>([])
   const [active, setActive] = useState<string | null>(null)
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null)
+
+  useEffect(() => window.codehamr.onUpdateReady(setUpdateVersion), [])
 
   const openWorkspace = async (): Promise<void> => {
     const dir = await window.codehamr.pickWorkspace()
@@ -72,11 +75,20 @@ export default function App(): React.JSX.Element {
         ))}
         <button
           onClick={() => void openWorkspace()}
-          title="open a project folder"
+          title="open a project folder (Ctrl+O)"
           className="rounded px-2 py-1 text-sm text-zinc-400 hover:bg-zinc-800"
         >
           +
         </button>
+        {updateVersion && (
+          <button
+            onClick={() => void window.codehamr.installUpdate()}
+            title="an update downloaded in the background; restarting applies it (stops running agents)"
+            className="ml-auto rounded bg-sky-800 px-2.5 py-1 text-xs font-medium text-sky-100 hover:bg-sky-700"
+          >
+            Update to v{updateVersion} — restart
+          </button>
+        )}
       </header>
 
       {tabs.length === 0 && (

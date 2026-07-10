@@ -61,5 +61,18 @@ jobs:
         working-directory: apps/desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Unsigned build until certs exist (P6): skip signing discovery.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Apple signing + notarization, driven entirely by repo secrets:
+          #   MAC_CERT_P12         base64 of the Developer ID Application .p12
+          #   MAC_CERT_PASSWORD    the .p12 export password
+          #   APPLE_ID             Apple ID email
+          #   APPLE_APP_SPECIFIC_PASSWORD  from appleid.apple.com
+          #   APPLE_TEAM_ID        10-char team id from the developer portal
+          # With the secrets unset these env vars are empty strings, which
+          # electron-builder treats as absent: the build stays unsigned and
+          # auto-discovery is disabled so the runner keychain can't interfere.
+          CSC_LINK: ${{ secrets.MAC_CERT_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.MAC_CERT_P12 != '' && 'true' || 'false' }}

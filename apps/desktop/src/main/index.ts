@@ -10,8 +10,11 @@ import {
 } from 'node:fs'
 import { readFile, writeFile, readdir, stat } from 'node:fs/promises'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import electronUpdater from 'electron-updater'
 import { Command, ConfigFile } from '@codehamr-ui/protocol'
 import { AgentSession } from './agent/AgentSession'
+
+const { autoUpdater } = electronUpdater
 
 let win: BrowserWindow | null = null
 
@@ -305,8 +308,32 @@ function wireIpc(): void {
   })
 }
 
+/**
+ * Auto-update from GitHub Releases (the electron-builder publish config is
+ * baked into the app). Download silently; apply only when the user opts in
+ * from the banner — never restart an app that has live agent sessions.
+ * Dev builds skip entirely.
+ */
+function wireAutoUpdate(): void {
+  if (!app.isPackaged) return
+  autoUpdater.autoDownload = true
+  autoUpdater.on('update-downloaded', (info) => {
+    win?.webContents.send('app:update-ready', info.version)
+  })
+  autoUpdater.on('error', (err) => {
+    // Non-fatal by definition: the running app is fine, only the check failed.
+    console.error('[updater]', err.message)
+  })
+  ipcMain.handle('app:install-update', async () => {
+    for (const cwd of [...sessions.keys()]) stopSession(cwd)
+    autoUpdater.quitAndInstall()
+  })
+  void autoUpdater.checkForUpdates()
+}
+
 app.whenReady().then(() => {
   wireIpc()
+  wireAutoUpdate()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

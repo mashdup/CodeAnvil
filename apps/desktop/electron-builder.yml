@@ -33,12 +33,17 @@ nsis:
 
 # macOS: built by the release workflow on a macos (arm64) runner. arm64 only:
 # the agent binary is compiled on the runner for its host arch; an Intel dmg
-# needs a second Go cross-build first (PLAN.md Phase 2 note). Unsigned until
-# certs exist. zip target included because electron-updater on macOS requires
-# it (future P6).
+# needs a second Go cross-build first (PLAN.md Phase 2 note). Signing +
+# notarization happen when the release workflow finds the Apple secrets
+# (CSC_LINK / APPLE_ID family); absent secrets, the build stays unsigned.
+# zip target: electron-updater on macOS updates from the zip, not the dmg.
 mac:
   icon: build/icon.png
   category: public.app-category.developer-tools
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  gatekeeperAssess: false
   target:
     - target: dmg
       arch: [arm64]
