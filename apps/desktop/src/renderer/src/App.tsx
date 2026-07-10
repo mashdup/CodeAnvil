@@ -470,7 +470,7 @@ export default function App(): React.JSX.Element {
 
       <footer className="border-t border-zinc-800 p-3">
         {attachments.length > 0 && (
-          <div className="mb-2 flex gap-2">
+          <div className="mb-2 flex items-end gap-2">
             {attachments.map((a, i) => (
               <div key={i} className="group relative">
                 <img
@@ -485,6 +485,7 @@ export default function App(): React.JSX.Element {
                 </button>
               </div>
             ))}
+            <VisionHint models={models} activeModel={activeModel} />
           </div>
         )}
         <div className="flex gap-2">
@@ -522,6 +523,32 @@ export default function App(): React.JSX.Element {
         </div>
       </footer>
     </div>
+  )
+}
+
+/**
+ * VisionHint sits beside queued attachments and names the model they'll be
+ * sent to. Capability can't be detected reliably across arbitrary endpoints,
+ * so this is a soft heuristic: warn-toned when the model name doesn't look
+ * multimodal (some servers silently IGNORE image parts on text-only models —
+ * no error ever arrives, so this hint is the only clue the user gets).
+ */
+function VisionHint({
+  models,
+  activeModel,
+}: {
+  models: ModelProfile[]
+  activeModel: string
+}): React.JSX.Element | null {
+  const llm = models.find((m) => m.name === activeModel)?.llm ?? ''
+  if (!llm) return null
+  const looksVision = /vl|vision|llava|gemma3|4o|pixtral|multimodal/i.test(llm)
+  return (
+    <span className={`pb-0.5 text-[11px] ${looksVision ? 'text-zinc-500' : 'text-amber-400'}`}>
+      {looksVision
+        ? `image will be sent to ${llm}`
+        : `heads-up: "${llm}" doesn't look like a vision model — it may ignore or reject the image`}
+    </span>
   )
 }
 
