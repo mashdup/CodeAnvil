@@ -233,6 +233,17 @@ export default function Workspace({
     )
   }, [])
 
+  // Transient toast for ephemeral status (session resume, etc.) that doesn't
+  // belong in the permanent chat log.
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimer = useRef<number | null>(null)
+  const showToast = useCallback((msg: string) => {
+    setToast(msg)
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(null), 3500)
+  }, [])
+  useEffect(() => () => window.clearTimeout(toastTimer.current ?? undefined), [])
+
   // Fold agent events into the transcript.
   const onEvent = useCallback(
     (event: AgentEvent) => {
@@ -249,12 +260,7 @@ export default function Workspace({
             })
           }
           if (event.historyLen) {
-            push({
-              kind: 'notice',
-              id: uid(),
-              text: `resumed session — the model remembers ${event.historyLen} messages`,
-              tone: 'info',
-            })
+            showToast(`Resumed session — the model remembers ${event.historyLen} messages`)
           }
           break
         case 'cleared':
@@ -359,7 +365,7 @@ export default function Workspace({
           break
       }
     },
-    [endTurn, push],
+    [endTurn, push, showToast, cwd],
   )
 
   // Subscribe to this workspace's slice of the event streams.
@@ -1127,6 +1133,14 @@ export default function Workspace({
           </>
         )}
       </div>
+
+      {toast && (
+        <div className="pointer-events-none absolute bottom-24 left-1/2 z-30 -translate-x-1/2">
+          <div className="rounded-full border border-zinc-700 bg-zinc-800/95 px-4 py-1.5 text-xs text-zinc-200 shadow-lg">
+            {toast}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
