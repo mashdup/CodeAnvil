@@ -72,6 +72,12 @@ const api = {
     ipcRenderer.on('agent:noise', handler)
     return () => ipcRenderer.removeListener('agent:noise', handler)
   },
+  onFsChanged: (cb: (cwd: string) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, payload: { cwd: string }): void =>
+      cb(payload.cwd)
+    ipcRenderer.on('fs:changed', handler)
+    return () => ipcRenderer.removeListener('fs:changed', handler)
+  },
   onUpdateReady: (cb: (version: string) => void): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, version: string): void => cb(version)
     ipcRenderer.on('app:update-ready', handler)

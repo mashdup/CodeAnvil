@@ -334,6 +334,14 @@ export default function Workspace({
     }
   }, [cwd, onEvent, endTurn, push])
 
+  // Filesystem changes in this workspace (agent bash, external edits) refresh
+  // the tree — the file_diff bump only covers write/edit_file.
+  useEffect(() => {
+    return window.codehamr.onFsChanged((changed) => {
+      if (changed === cwd) setTreeRefresh((n) => n + 1)
+    })
+  }, [cwd])
+
   // Elapsed ticker for the status bar: proof of life while the model is silent.
   useEffect(() => {
     if (turnStart === null) return

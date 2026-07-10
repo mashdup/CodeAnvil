@@ -6,7 +6,9 @@ import {
   createWriteStream,
   readFileSync,
   writeFileSync,
+  watch,
   type WriteStream,
+  type FSWatcher,
 } from 'node:fs'
 import { readFile, writeFile, readdir, stat, rename, rm } from 'node:fs/promises'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
@@ -28,6 +30,58 @@ interface WorkspaceSession {
   log: WriteStream | null
 }
 const sessions = new Map<string, WorkspaceSession>()
+
+// Filesystem watchers keep each open workspace's file tree live: agent bash
+// commands (mkdir, git clone, npm install, build output) and external edits
+// don't emit file_diff, so without this the tree only caught write/edit_file.
+// Keyed by workspace and independent of the agent's restart cycle — the tree
+// outlives any single agent process.
+const watchers = new Map<string, FSWatcher>()
+
+// Directory names whose churn must never trigger a refresh: .codehamr writes
+// session/transcript/log constantly (a refresh loop waiting to happen), and
+// the rest are high-volume noise the tree omits anyway.
+const watchIgnore = new Set([
+  '.codehamr',
+  '.git',
+  'node_modules',
+  'vendor',
+  'dist',
+  'out',
+  'release',
+  'target',
+  '.next',
+  '__pycache__',
+  '.venv',
+  'venv',
+])
+
+function startWatcher(cwd: string): void {
+  if (watchers.has(cwd)) return // survives agent restarts; start once per tab
+  let timer: NodeJS.Timeout | null = null
+  try {
+    // recursive is native on Windows and macOS (our targets); on Linux it's
+    // unsupported and throws — caught below, leaving the tree manual-refresh.
+    const w = watch(cwd, { recursive: true, persistent: false }, (_evt, filename) => {
+      if (filename) {
+        const segs = String(filename).split(/[\\/]/)
+        if (segs.some((s) => watchIgnore.has(s))) return
+      }
+      // Coalesce bursts (npm install fires thousands of events) into one ping.
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => win?.webContents.send('fs:changed', { cwd }), 300)
+    })
+    w.on('error', (e) => console.error('[watch]', cwd, e.message))
+    watchers.set(cwd, w)
+  } catch (e) {
+    console.error('[watch] could not watch', cwd, (e as Error).message)
+  }
+}
+
+function stopWatcher(cwd: string): void {
+  watchers.get(cwd)?.close()
+  watchers.delete(cwd)
+}
 
 function stopSession(cwd: string): void {
   const ws = sessions.get(cwd)
@@ -266,6 +320,7 @@ function wireIpc(): void {
       },
     })
     sessions.set(cwd, { session, log })
+    startWatcher(cwd) // idempotent — persists across the agent's restarts
     session.start()
     return { running: session.running, seededFrom }
   })
@@ -279,6 +334,7 @@ function wireIpc(): void {
 
   ipcMain.handle('agent:stop', async (_evt, cwd: string) => {
     stopSession(cwd)
+    stopWatcher(cwd) // tab closed for good; not just an agent restart
   })
 
   // UI transcript persistence: the renderer's rich view (tool cards, diffs)
@@ -491,5 +547,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   for (const cwd of [...sessions.keys()]) stopSession(cwd)
+  for (const cwd of [...watchers.keys()]) stopWatcher(cwd)
   if (process.platform !== 'darwin') app.quit()
 })
