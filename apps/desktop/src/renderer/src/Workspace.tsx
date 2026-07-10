@@ -65,6 +65,60 @@ const MAX_INLINE_CHARS = 60_000 // ~15k tokens; the rest is a read_file away
 /** Last path segment, for the auto-mode banner and file chips. */
 const basename = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p
 
+/** Panel width persisted app-wide so it survives restarts and new tabs. */
+function usePanelWidth(
+  key: string,
+  initial: number,
+): [number, (updater: (w: number) => number) => void] {
+  const [w, setW] = useState(() => {
+    const s = Number(localStorage.getItem(`chpanel:${key}`))
+    return Number.isFinite(s) && s > 0 ? s : initial
+  })
+  const set = useCallback(
+    (updater: (w: number) => number) =>
+      setW((prev) => {
+        const next = updater(prev)
+        localStorage.setItem(`chpanel:${key}`, String(next))
+        return next
+      }),
+    [key],
+  )
+  return [w, set]
+}
+
+/**
+ * Draggable vertical divider. `onResize` receives the incremental pointer
+ * delta (px) since the last move; the parent clamps and applies it.
+ */
+function ResizeHandle({ onResize }: { onResize: (dx: number) => void }): React.JSX.Element {
+  const onMouseDown = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    let last = e.clientX
+    const move = (ev: MouseEvent): void => {
+      onResize(ev.clientX - last)
+      last = ev.clientX
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      className="w-1 shrink-0 cursor-col-resize bg-zinc-800 transition-colors hover:bg-sky-600"
+    />
+  )
+}
+
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
+
 const readAs = (file: File, how: 'dataURL' | 'text'): Promise<string> =>
   new Promise((resolve, reject) => {
     const r = new FileReader()
@@ -138,6 +192,8 @@ export default function Workspace({
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [showFiles, setShowFiles] = useState(true)
+  const [treeWidth, setTreeWidth] = usePanelWidth('tree', 224)
+  const [previewWidth, setPreviewWidth] = usePanelWidth('preview', 480)
   const [treeRefresh, setTreeRefresh] = useState(0)
   const [viewer, setViewer] = useState<Preview | null>(null)
   const [items, setItems] = useState<Item[]>([])
@@ -896,14 +952,22 @@ export default function Workspace({
 
       <div className="flex min-h-0 flex-1">
         {showFiles && (
-          <aside className="w-56 shrink-0 overflow-y-auto border-r border-zinc-800">
-            <FileTree
-              root={cwd}
-              touched={touched}
-              refreshKey={treeRefresh}
-              onOpen={(p) => void openFile(p)}
+          <>
+            <aside
+              style={{ width: treeWidth }}
+              className="shrink-0 overflow-y-auto border-r border-zinc-800"
+            >
+              <FileTree
+                root={cwd}
+                touched={touched}
+                refreshKey={treeRefresh}
+                onOpen={(p) => void openFile(p)}
+              />
+            </aside>
+            <ResizeHandle
+              onResize={(dx) => setTreeWidth((w) => clamp(w + dx, 160, 560))}
             />
-          </aside>
+          </>
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -1045,14 +1109,22 @@ export default function Workspace({
         </div>
 
         {viewer && (
-          <div className="flex w-2/5 shrink-0">
-            <FilePreview
-              preview={viewer}
-              workspaceRoot={cwd}
-              onClose={() => setViewer(null)}
-              onUseInPrompt={useSnippetInPrompt}
+          <>
+            <ResizeHandle
+              // Handle sits left of the preview: dragging left widens it.
+              onResize={(dx) =>
+                setPreviewWidth((w) => clamp(w - dx, 320, window.innerWidth - 360))
+              }
             />
-          </div>
+            <div style={{ width: previewWidth }} className="flex shrink-0">
+              <FilePreview
+                preview={viewer}
+                workspaceRoot={cwd}
+                onClose={() => setViewer(null)}
+                onUseInPrompt={useSnippetInPrompt}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>
