@@ -79,9 +79,11 @@ function b64ToBytes(b64: string): Uint8Array {
 export function FilePreview({
   preview,
   onClose,
+  onUseInPrompt,
 }: {
   preview: Preview
   onClose: () => void
+  onUseInPrompt: (snippet: string) => void
 }): React.JSX.Element {
   return (
     <div className="flex min-w-0 flex-1 flex-col border-l border-zinc-800">
@@ -100,16 +102,22 @@ export function FilePreview({
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        <Body preview={preview} />
+        <Body preview={preview} onUseInPrompt={onUseInPrompt} />
       </div>
     </div>
   )
 }
 
-function Body({ preview }: { preview: Preview }): React.JSX.Element {
+function Body({
+  preview,
+  onUseInPrompt,
+}: {
+  preview: Preview
+  onUseInPrompt: (snippet: string) => void
+}): React.JSX.Element {
   switch (preview.kind) {
     case 'text':
-      return <CodeView content={preview.content} path={preview.path} />
+      return <CodeView content={preview.content} path={preview.path} onUseInPrompt={onUseInPrompt} />
     case 'markdown':
       return (
         <div className="markdown px-4 py-3 text-sm text-zinc-200">
@@ -179,7 +187,15 @@ function splitHighlightedLines(html: string): string[] {
  * selects that line; dragging across numbers selects the range. Falls back to
  * plain text for unknown types and to a non-interactive blob for huge files.
  */
-function CodeView({ content, path }: { content: string; path: string }): React.JSX.Element {
+function CodeView({
+  content,
+  path,
+  onUseInPrompt,
+}: {
+  content: string
+  path: string
+  onUseInPrompt: (snippet: string) => void
+}): React.JSX.Element {
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
   const lang = EXT_LANG[ext]
   const html = useMemo(() => {
@@ -204,10 +220,15 @@ function CodeView({ content, path }: { content: string; path: string }): React.J
   const [head, setHead] = useState<number | null>(null)
   const [dragging, setDragging] = useState(false)
 
-  // Clear the selection when the previewed file changes.
+  // Floating action menu for a native text selection within the code.
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; text: string } | null>(null)
+
+  // Clear line-selection and menu when the previewed file changes.
   useEffect(() => {
     setAnchor(null)
     setHead(null)
+    setMenu(null)
   }, [content])
 
   // End a drag even if the mouse is released outside the gutter.
@@ -218,17 +239,55 @@ function CodeView({ content, path }: { content: string; path: string }): React.J
     return () => window.removeEventListener('mouseup', up)
   }, [dragging])
 
+  // Dismiss the menu on scroll (its fixed position would otherwise detach).
+  useEffect(() => {
+    if (!menu) return
+    const dismiss = (): void => setMenu(null)
+    window.addEventListener('scroll', dismiss, true)
+    return () => window.removeEventListener('scroll', dismiss, true)
+  }, [menu])
+
+  const onTextMouseUp = (): void => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+      setMenu(null)
+      return
+    }
+    const range = sel.getRangeAt(0)
+    if (!containerRef.current?.contains(range.commonAncestorContainer)) {
+      setMenu(null)
+      return
+    }
+    const rect = range.getBoundingClientRect()
+    setMenu({ x: rect.left, y: rect.bottom + 6, text: sel.toString() })
+  }
+
+  const dismissSelection = (): void => {
+    setMenu(null)
+    window.getSelection()?.removeAllRanges()
+  }
+
+  const useInPrompt = (): void => {
+    if (!menu) return
+    const body = menu.text.replace(/\n+$/, '')
+    onUseInPrompt('```' + (lang || ext) + '\n' + body + '\n```')
+    dismissSelection()
+  }
+
+  const copySelection = (): void => {
+    if (menu) void navigator.clipboard.writeText(menu.text)
+    dismissSelection()
+  }
+
   const lo = anchor !== null && head !== null ? Math.min(anchor, head) : null
   const hi = anchor !== null && head !== null ? Math.max(anchor, head) : null
   const selected = (n: number): boolean => lo !== null && n >= lo && n <= hi!
 
-  // Non-interactive fast path: original two-column blob for very large files.
-  if (!interactive) {
-    const gutter = rawLines.map((_, i) => i + 1).join('\n')
-    return (
+  const body =
+    !interactive ? (
       <div className="flex font-mono text-xs leading-5">
         <pre className="sticky left-0 shrink-0 border-r border-zinc-800 bg-zinc-950/60 px-3 py-2 text-right text-zinc-600 select-none">
-          {gutter}
+          {rawLines.map((_, i) => i + 1).join('\n')}
         </pre>
         <pre className="flex-1 overflow-x-auto px-3 py-2">
           {html ? (
@@ -238,43 +297,68 @@ function CodeView({ content, path }: { content: string; path: string }): React.J
           )}
         </pre>
       </div>
+    ) : (
+      <div className="hljs w-max min-w-full !bg-transparent py-2 font-mono text-xs leading-5">
+        {rawLines.map((raw, i) => {
+          const n = i + 1
+          const sel = selected(n)
+          return (
+            <div key={i} className={`flex w-full ${sel ? 'bg-sky-500/15' : ''}`}>
+              <span
+                onMouseDown={(e) => {
+                  e.preventDefault() // don't start a native text selection
+                  setAnchor(n)
+                  setHead(n)
+                  setDragging(true)
+                }}
+                onMouseEnter={() => dragging && setHead(n)}
+                className={`sticky left-0 w-12 shrink-0 cursor-pointer border-r border-zinc-800 px-2 text-right select-none ${
+                  sel
+                    ? 'bg-sky-500/20 text-sky-300'
+                    : 'bg-zinc-950 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-400'
+                }`}
+              >
+                {n}
+              </span>
+              {htmlLines ? (
+                <code
+                  className="flex-1 px-3 whitespace-pre"
+                  dangerouslySetInnerHTML={{ __html: htmlLines[i] || ' ' }}
+                />
+              ) : (
+                <code className="flex-1 px-3 whitespace-pre text-zinc-300">{raw || ' '}</code>
+              )}
+            </div>
+          )
+        })}
+      </div>
     )
-  }
 
   return (
-    <div className="hljs w-max min-w-full !bg-transparent py-2 font-mono text-xs leading-5">
-      {rawLines.map((raw, i) => {
-        const n = i + 1
-        const sel = selected(n)
-        return (
-          <div key={i} className={`flex w-full ${sel ? 'bg-sky-500/15' : ''}`}>
-            <span
-              onMouseDown={(e) => {
-                e.preventDefault() // don't start a native text selection
-                setAnchor(n)
-                setHead(n)
-                setDragging(true)
-              }}
-              onMouseEnter={() => dragging && setHead(n)}
-              className={`sticky left-0 w-12 shrink-0 cursor-pointer border-r border-zinc-800 px-2 text-right select-none ${
-                sel
-                  ? 'bg-sky-500/20 text-sky-300'
-                  : 'bg-zinc-950 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-400'
-              }`}
-            >
-              {n}
-            </span>
-            {htmlLines ? (
-              <code
-                className="flex-1 px-3 whitespace-pre"
-                dangerouslySetInnerHTML={{ __html: htmlLines[i] || ' ' }}
-              />
-            ) : (
-              <code className="flex-1 px-3 whitespace-pre text-zinc-300">{raw || ' '}</code>
-            )}
-          </div>
-        )
-      })}
+    <div ref={containerRef} onMouseUp={onTextMouseUp}>
+      {body}
+      {menu && (
+        <div
+          // preventDefault on mousedown keeps the text selection alive through
+          // the click, so the handlers still see it.
+          onMouseDown={(e) => e.preventDefault()}
+          style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 50 }}
+          className="flex overflow-hidden rounded-md border border-zinc-700 bg-zinc-900 text-xs shadow-xl"
+        >
+          <button
+            onClick={useInPrompt}
+            className="px-2.5 py-1 font-medium text-emerald-300 hover:bg-zinc-800"
+          >
+            Use in prompt
+          </button>
+          <button
+            onClick={copySelection}
+            className="border-l border-zinc-700 px-2.5 py-1 text-zinc-300 hover:bg-zinc-800"
+          >
+            Copy
+          </button>
+        </div>
+      )}
     </div>
   )
 }

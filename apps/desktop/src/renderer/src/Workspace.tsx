@@ -140,6 +140,7 @@ export default function Workspace({
   const [viewer, setViewer] = useState<Preview | null>(null)
   const [items, setItems] = useState<Item[]>([])
   const [input, setInput] = useState('')
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const [queue, setQueue] = useState<{ text: string; images: Attachment[] }[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -609,6 +610,18 @@ export default function Workspace({
     await window.codehamr.send(cwd, { v: PROTOCOL_VERSION, type: 'set_model', name })
   }
 
+  /** Insert a snippet from the preview pane into the chat input, then focus. */
+  const useSnippetInPrompt = (snippet: string): void => {
+    setInput((prev) => (prev.trim() ? `${prev.replace(/\s*$/, '')}\n\n${snippet}\n` : `${snippet}\n`))
+    requestAnimationFrame(() => {
+      const el = inputRef.current
+      if (el) {
+        el.focus()
+        el.selectionStart = el.selectionEnd = el.value.length
+      }
+    })
+  }
+
   const switchMode = async (next: PermissionMode): Promise<void> => {
     if (busy || next === mode) return
     modeRef.current = next // 'ready' after a restart must see the new choice
@@ -976,6 +989,7 @@ export default function Workspace({
             )}
             <div className="flex gap-2">
               <textarea
+                ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onPaste={(e) => {
@@ -1020,7 +1034,11 @@ export default function Workspace({
 
         {viewer && (
           <div className="flex w-2/5 shrink-0">
-            <FilePreview preview={viewer} onClose={() => setViewer(null)} />
+            <FilePreview
+              preview={viewer}
+              onClose={() => setViewer(null)}
+              onUseInPrompt={useSnippetInPrompt}
+            />
           </div>
         )}
       </div>
