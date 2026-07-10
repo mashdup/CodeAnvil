@@ -30,6 +30,15 @@ const api = {
     | { kind: 'text'; content: string; truncated: boolean; size: number }
     | { kind: 'binary' | 'too-large'; size: number }
   > => ipcRenderer.invoke('fs:read', root, file),
+  readPreview: (
+    root: string,
+    file: string,
+  ): Promise<
+    | { kind: 'text' | 'markdown'; content: string; truncated: boolean; size: number }
+    | { kind: 'image'; mime: string; dataB64: string }
+    | { kind: 'pdf' | 'docx'; dataB64: string }
+    | { kind: 'binary' | 'too-large'; size: number }
+  > => ipcRenderer.invoke('preview:read', root, file),
   getMode: (cwd: string): Promise<PermissionMode> => ipcRenderer.invoke('mode:get', cwd),
   setMode: (cwd: string, mode: PermissionMode): Promise<void> =>
     ipcRenderer.invoke('mode:set', cwd, mode),

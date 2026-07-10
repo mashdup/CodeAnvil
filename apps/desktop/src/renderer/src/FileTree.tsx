@@ -105,32 +105,3 @@ export function FileTree({
 
   return <div className="py-1 font-mono text-xs">{renderDir(root, 0)}</div>
 }
-
-/** Read-only file viewer pane content. */
-export function FileViewer({
-  file,
-  onClose,
-}: {
-  file: { path: string; body: string; note: string | null }
-  onClose: () => void
-}): React.JSX.Element {
-  return (
-    <div className="flex min-w-0 flex-1 flex-col border-l border-zinc-800">
-      <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
-        <span className="truncate font-mono text-xs text-zinc-300" title={file.path}>
-          {file.path}
-        </span>
-        {file.note && <span className="shrink-0 text-[10px] text-amber-400">{file.note}</span>}
-        <button
-          onClick={onClose}
-          className="ml-auto shrink-0 rounded px-1.5 text-zinc-400 hover:bg-zinc-800"
-        >
-          ✕
-        </button>
-      </div>
-      <pre className="flex-1 overflow-auto px-3 py-2 font-mono text-xs leading-5 whitespace-pre text-zinc-300">
-        {file.body}
-      </pre>
-    </div>
-  )
-}

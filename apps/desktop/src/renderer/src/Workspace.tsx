@@ -4,7 +4,8 @@ import remarkGfm from 'remark-gfm'
 import type { AgentEvent, ModelProfile, PermissionMode } from '@codehamr-ui/protocol'
 import { PROTOCOL_VERSION } from '@codehamr-ui/protocol'
 import { SettingsPanel } from './Settings'
-import { FileTree, FileViewer } from './FileTree'
+import { FileTree } from './FileTree'
+import { FilePreview, type Preview } from './FilePreview'
 
 // ---------------------------------------------------------------------------
 // Transcript model: the renderer's view of the conversation, built by folding
@@ -136,9 +137,7 @@ export default function Workspace({
   const [dragOver, setDragOver] = useState(false)
   const [showFiles, setShowFiles] = useState(true)
   const [treeRefresh, setTreeRefresh] = useState(0)
-  const [viewer, setViewer] = useState<{ path: string; body: string; note: string | null } | null>(
-    null,
-  )
+  const [viewer, setViewer] = useState<Preview | null>(null)
   const [items, setItems] = useState<Item[]>([])
   const [input, setInput] = useState('')
   const [queue, setQueue] = useState<{ text: string; images: Attachment[] }[]>([])
@@ -484,19 +483,25 @@ export default function Workspace({
   const openFile = useCallback(
     async (path: string): Promise<void> => {
       const abs = toAbs(path)
-      const result = await window.codehamr.readTextFile(cwd, abs)
-      if (result.kind === 'text') {
-        setViewer({
-          path: abs,
-          body: result.content,
-          note: result.truncated ? 'truncated view' : null,
-        })
-      } else {
-        setViewer({
-          path: abs,
-          body: '',
-          note: result.kind === 'binary' ? 'binary file' : `too large (${result.size} bytes)`,
-        })
+      const r = await window.codehamr.readPreview(cwd, abs)
+      switch (r.kind) {
+        case 'text':
+        case 'markdown':
+          setViewer({ kind: r.kind, path: abs, content: r.content, note: r.truncated ? 'truncated view' : null })
+          break
+        case 'image':
+          setViewer({ kind: 'image', path: abs, mime: r.mime, dataB64: r.dataB64 })
+          break
+        case 'pdf':
+        case 'docx':
+          setViewer({ kind: r.kind, path: abs, dataB64: r.dataB64 })
+          break
+        case 'binary':
+          setViewer({ kind: 'unsupported', path: abs, note: 'no preview for this file type' })
+          break
+        case 'too-large':
+          setViewer({ kind: 'unsupported', path: abs, note: `too large to preview (${Math.round(r.size / 1024)}KB)` })
+          break
       }
     },
     [cwd, toAbs],
@@ -1015,7 +1020,7 @@ export default function Workspace({
 
         {viewer && (
           <div className="flex w-2/5 shrink-0">
-            <FileViewer file={viewer} onClose={() => setViewer(null)} />
+            <FilePreview preview={viewer} onClose={() => setViewer(null)} />
           </div>
         )}
       </div>

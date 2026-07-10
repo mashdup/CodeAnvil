@@ -415,6 +415,54 @@ function wireIpc(): void {
     }
   })
 
+  // Rich file preview: classify by extension, return text for code/markdown
+  // and base64 for the binary formats the renderer knows how to display
+  // (images, PDF, docx). Unknown binaries get kind 'binary' (no preview).
+  const IMAGE_EXTS: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    bmp: 'image/bmp',
+    ico: 'image/x-icon',
+    avif: 'image/avif',
+  }
+  const MD_EXTS = new Set(['md', 'markdown', 'mdx'])
+
+  ipcMain.handle('preview:read', async (_evt, root: string, file: string) => {
+    const abs = insideWorkspace(root, file)
+    const info = await stat(abs)
+    const ext = abs.slice(abs.lastIndexOf('.') + 1).toLowerCase()
+    const TEXT_CAP = 512 * 1024
+    const BIN_CAP = 30 * 1024 * 1024 // PDFs/docx can be chunky; base64 over IPC
+
+    if (IMAGE_EXTS[ext]) {
+      if (info.size > BIN_CAP) return { kind: 'too-large', size: info.size }
+      return {
+        kind: 'image',
+        mime: IMAGE_EXTS[ext],
+        dataB64: (await readFile(abs)).toString('base64'),
+      }
+    }
+    if (ext === 'pdf' || ext === 'docx') {
+      if (info.size > BIN_CAP) return { kind: 'too-large', size: info.size }
+      return { kind: ext, dataB64: (await readFile(abs)).toString('base64') }
+    }
+
+    // Everything else: try as text.
+    if (info.size > TEXT_CAP * 8) return { kind: 'too-large', size: info.size }
+    const buf = await readFile(abs)
+    if (buf.subarray(0, 8192).includes(0)) return { kind: 'binary', size: info.size }
+    return {
+      kind: MD_EXTS.has(ext) ? 'markdown' : 'text',
+      content: buf.subarray(0, TEXT_CAP).toString('utf8'),
+      truncated: buf.length > TEXT_CAP,
+      size: info.size,
+    }
+  })
+
   // -------------------------------------------------------------------------
   // Chat history
   // -------------------------------------------------------------------------
