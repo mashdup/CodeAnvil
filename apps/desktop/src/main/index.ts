@@ -85,6 +85,26 @@ interface PresetStore {
 
 const presetsPath = (): string => join(app.getPath('userData'), 'presets.json')
 
+/**
+ * Permission mode per workspace, kept in userData rather than the project's
+ * .codehamr/ — trusting a folder is a decision about *your* machine, and it
+ * must not ride along when a repo is shared or committed.
+ */
+const modesPath = (): string => join(app.getPath('userData'), 'modes.json')
+
+function readModes(): Record<string, 'ask' | 'auto'> {
+  try {
+    const raw = JSON.parse(readFileSync(modesPath(), 'utf8')) as Record<string, unknown>
+    const out: Record<string, 'ask' | 'auto'> = {}
+    for (const [k, v] of Object.entries(raw)) {
+      if (v === 'ask' || v === 'auto') out[k] = v
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
 function readPresets(): PresetStore {
   try {
     const raw = JSON.parse(readFileSync(presetsPath(), 'utf8')) as {
@@ -394,6 +414,15 @@ function wireIpc(): void {
     const meta = readChatMeta(cwd)
     if (id === meta.current) throw new Error('cannot delete the active chat')
     await rm(join(chatsDir(cwd), id), { recursive: true, force: true })
+  })
+
+  ipcMain.handle('mode:get', async (_evt, cwd: string) => readModes()[cwd] ?? 'ask')
+
+  ipcMain.handle('mode:set', async (_evt, cwd: string, mode: 'ask' | 'auto') => {
+    if (mode !== 'ask' && mode !== 'auto') throw new Error(`unknown mode: ${mode}`)
+    const modes = readModes()
+    modes[cwd] = mode
+    writeFileSync(modesPath(), JSON.stringify(modes, null, 2), 'utf8')
   })
 
   ipcMain.handle('presets:list', async () => {

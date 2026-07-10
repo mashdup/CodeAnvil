@@ -56,6 +56,16 @@ export const ClearCommand = z.object({
   type: z.literal('clear'),
 })
 
+/** ask = gate every side-effecting tool; auto = run them unattended. */
+export const PermissionMode = z.enum(['ask', 'auto'])
+export type PermissionMode = z.infer<typeof PermissionMode>
+
+export const SetModeCommand = z.object({
+  v: z.literal(PROTOCOL_VERSION),
+  type: z.literal('set_mode'),
+  mode: PermissionMode,
+})
+
 export const Command = z.discriminatedUnion('type', [
   PromptCommand,
   ApproveCommand,
@@ -63,6 +73,7 @@ export const Command = z.discriminatedUnion('type', [
   SetModelCommand,
   GetModelsCommand,
   ClearCommand,
+  SetModeCommand,
 ])
 export type Command = z.infer<typeof Command>
 
@@ -86,11 +97,18 @@ export const ReadyEvent = z.object({
   models: z.array(ModelProfile),
   /** Messages restored from .codehamr/session.json; absent when fresh. */
   historyLen: z.number().int().nonnegative().optional(),
+  mode: PermissionMode.optional(),
 })
 
 export const ClearedEvent = z.object({
   v: z.literal(PROTOCOL_VERSION),
   type: z.literal('cleared'),
+})
+
+export const ModeEvent = z.object({
+  v: z.literal(PROTOCOL_VERSION),
+  type: z.literal('mode'),
+  mode: PermissionMode,
 })
 
 export const AssistantDeltaEvent = z.object({
@@ -172,6 +190,7 @@ export const LogEvent = z.object({
 export const AgentEvent = z.discriminatedUnion('type', [
   ReadyEvent,
   ClearedEvent,
+  ModeEvent,
   AssistantDeltaEvent,
   ReasoningDeltaEvent,
   AssistantDoneEvent,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentEvent, ModelProfile } from '@codehamr-ui/protocol'
+import type { AgentEvent, ModelProfile, PermissionMode } from '@codehamr-ui/protocol'
 import { PROTOCOL_VERSION } from '@codehamr-ui/protocol'
 import { SettingsPanel } from './Settings'
 import { FileTree, FileViewer } from './FileTree'
@@ -47,6 +47,9 @@ interface Attachment {
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
+/** Last path segment, for the auto-mode banner. */
+const basename = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p
+
 /** File → base64 attachment; oversized or non-image files resolve to null. */
 async function fileToAttachment(file: File): Promise<Attachment | null> {
   if (!file.type.startsWith('image/') || file.size > MAX_IMAGE_BYTES) return null
@@ -76,6 +79,7 @@ export default function Workspace({
   const [activeModel, setActiveModel] = useState<string>('')
   const [models, setModels] = useState<ModelProfile[]>([])
   const [showSettings, setShowSettings] = useState(false)
+  const [mode, setMode] = useState<PermissionMode>('ask')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [showFiles, setShowFiles] = useState(true)
@@ -98,6 +102,11 @@ export default function Workspace({
   const push = useCallback((item: Item) => {
     setItems((prev) => [...prev, item])
   }, [])
+
+  // The agent always boots in ask mode, so every start/restart must re-apply
+  // the workspace's chosen mode. A ref keeps onEvent free of a mode dep.
+  const modeRef = useRef<PermissionMode>('ask')
+  modeRef.current = mode
 
   const endTurn = useCallback(() => {
     setBusy(false)
@@ -122,6 +131,13 @@ export default function Workspace({
           setConnected(true)
           setActiveModel(event.activeModel)
           setModels(event.models)
+          if (modeRef.current !== (event.mode ?? 'ask')) {
+            void window.codehamr.send(cwd, {
+              v: PROTOCOL_VERSION,
+              type: 'set_mode',
+              mode: modeRef.current,
+            })
+          }
           if (event.historyLen) {
             push({
               kind: 'notice',
@@ -133,6 +149,9 @@ export default function Workspace({
           break
         case 'cleared':
           setItems([])
+          break
+        case 'mode':
+          setMode(event.mode) // the agent is the source of truth
           break
         case 'file_diff':
           setTreeRefresh((n) => n + 1) // the agent changed a file; tree catches up
@@ -281,6 +300,10 @@ export default function Workspace({
     if (bootedRef.current) return
     bootedRef.current = true
     void (async () => {
+      // Before the agent starts, so 'ready' can re-apply it.
+      const stored = await window.codehamr.getMode(cwd)
+      setMode(stored)
+      modeRef.current = stored
       const saved = (await window.codehamr.readTranscript(cwd)) as Item[] | null
       if (Array.isArray(saved)) {
         // Reseat the id counter past restored ids so new items can't collide.
@@ -512,6 +535,13 @@ export default function Workspace({
     await window.codehamr.send(cwd, { v: PROTOCOL_VERSION, type: 'set_model', name })
   }
 
+  const switchMode = async (next: PermissionMode): Promise<void> => {
+    if (busy || next === mode) return
+    modeRef.current = next // 'ready' after a restart must see the new choice
+    await window.codehamr.setMode(cwd, next) // persist for this workspace
+    await window.codehamr.send(cwd, { v: PROTOCOL_VERSION, type: 'set_mode', mode: next })
+  }
+
   const awaitingApproval = items.some(
     (it) => it.kind === 'tool' && it.status === 'pending_approval',
   )
@@ -674,6 +704,31 @@ export default function Workspace({
           </button>
         )}
         <div className="ml-auto flex items-center gap-2 text-xs text-zinc-400">
+          <span
+            className="flex overflow-hidden rounded border border-zinc-700"
+            title={
+              busy
+                ? 'finish or cancel the turn first'
+                : 'Ask: approve each bash/write/edit. Auto: the agent runs them unattended.'
+            }
+          >
+            {(['ask', 'auto'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => void switchMode(m)}
+                disabled={busy}
+                className={`px-2 py-0.5 disabled:opacity-50 ${
+                  mode === m
+                    ? m === 'auto'
+                      ? 'bg-amber-700 text-amber-50'
+                      : 'bg-zinc-700 text-zinc-100'
+                    : 'bg-zinc-900 hover:bg-zinc-800'
+                }`}
+              >
+                {m === 'ask' ? 'Ask' : 'Auto'}
+              </button>
+            ))}
+          </span>
           {models.length > 0 && (
             <select
               value={activeModel}
@@ -702,6 +757,23 @@ export default function Workspace({
           />
         </div>
       </div>
+
+      {mode === 'auto' && (
+        <div className="flex items-center gap-2 border-b border-amber-900/60 bg-amber-950/40 px-3 py-1 text-[11px] text-amber-300">
+          <span>⚠</span>
+          <span>
+            Auto mode — the agent runs bash commands and file writes in{' '}
+            <span className="font-mono">{basename(cwd)}</span> without asking. Cancel anytime.
+          </span>
+          <button
+            onClick={() => void switchMode('ask')}
+            disabled={busy}
+            className="ml-auto rounded bg-amber-900/60 px-2 py-0.5 hover:bg-amber-900 disabled:opacity-50"
+          >
+            switch to Ask
+          </button>
+        </div>
+      )}
 
       {showSettings && (
         <SettingsPanel

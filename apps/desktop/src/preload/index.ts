@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AgentEvent, Command, ConfigFile } from '@codehamr-ui/protocol'
+import type { AgentEvent, Command, ConfigFile, PermissionMode } from '@codehamr-ui/protocol'
 
 const api = {
   pickWorkspace: (): Promise<string | null> => ipcRenderer.invoke('workspace:pick'),
@@ -18,6 +18,9 @@ const api = {
     | { kind: 'text'; content: string; truncated: boolean; size: number }
     | { kind: 'binary' | 'too-large'; size: number }
   > => ipcRenderer.invoke('fs:read', root, file),
+  getMode: (cwd: string): Promise<PermissionMode> => ipcRenderer.invoke('mode:get', cwd),
+  setMode: (cwd: string, mode: PermissionMode): Promise<void> =>
+    ipcRenderer.invoke('mode:set', cwd, mode),
   listPresets: (): Promise<{ defaultPreset: string | null; presets: Record<string, ConfigFile> }> =>
     ipcRenderer.invoke('presets:list'),
   savePreset: (name: string, cfg: ConfigFile, setDefault: boolean): Promise<void> =>
