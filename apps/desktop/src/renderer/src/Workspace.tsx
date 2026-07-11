@@ -1540,7 +1540,63 @@ function MdCode({
   return <code className={className}>{children}</code>
 }
 
-const MD_COMPONENTS = { code: MdCode }
+/** Small clipboard button; flips to "Copied" for a beat after a click. */
+function CopyButton({
+  text,
+  className = '',
+}: {
+  text: string
+  className?: string
+}): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard.writeText(text)
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1500)
+      }}
+      title="copy to clipboard"
+      className={`rounded border border-zinc-700 bg-zinc-800/80 px-1.5 py-0.5 text-[10px] leading-none text-zinc-300 backdrop-blur transition hover:bg-zinc-700 ${className}`}
+    >
+      {copied ? '✓ Copied' : 'Copy'}
+    </button>
+  )
+}
+
+// Minimal shape of the hast node react-markdown hands to element components —
+// enough to walk it for the block's raw text (the rendered <code> may be
+// highlighted HTML, so the DOM children aren't a reliable source).
+type HastNode = { type?: string; value?: string; children?: HastNode[] }
+const nodeText = (n?: HastNode): string =>
+  !n ? '' : n.type === 'text' ? (n.value ?? '') : (n.children ?? []).map(nodeText).join('')
+
+/**
+ * Fenced code block wrapper: adds a hover-reveal Copy button. Overriding `pre`
+ * (not `code`) keeps inline code untouched — react-markdown only wraps block
+ * code in <pre>.
+ */
+function MdPre({
+  children,
+  node,
+}: {
+  children?: React.ReactNode
+  node?: HastNode
+}): React.JSX.Element {
+  const code = nodeText(node).replace(/\n$/, '')
+  return (
+    <div className="group/code relative">
+      <CopyButton
+        text={code}
+        className="absolute top-1.5 right-1.5 opacity-0 group-hover/code:opacity-100"
+      />
+      <pre>{children}</pre>
+    </div>
+  )
+}
+
+const MD_COMPONENTS = { code: MdCode, pre: MdPre }
 
 function Markdown({ text }: { text: string }): React.JSX.Element {
   return (
