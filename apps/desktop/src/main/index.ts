@@ -275,6 +275,23 @@ function createWindow(): void {
     height: 860,
     show: false,
     autoHideMenuBar: true,
+    // Frameless-with-native-controls: the renderer's own header IS the title
+    // bar (see App.tsx). 'hidden' drops the OS title bar on both platforms;
+    // macOS keeps its traffic lights, Windows draws min/max/close as an overlay
+    // tinted to match the header so there's no second, duplicate app title.
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: 12, y: 14 } } // vertically centered in the 40px bar
+      : {}),
+    ...(process.platform === 'win32'
+      ? {
+          titleBarOverlay: {
+            color: '#09090b', // zinc-950 — matches body / header background
+            symbolColor: '#a1a1aa', // zinc-400
+            height: 40,
+          },
+        }
+      : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

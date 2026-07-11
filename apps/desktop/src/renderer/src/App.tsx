@@ -48,10 +48,19 @@ export default function App(): React.JSX.Element {
     })
   }
 
+  const isMac = window.codehamr.platform === 'darwin'
+  const isWin = window.codehamr.platform === 'win32'
+
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1.5">
-        <span className="px-2 font-semibold tracking-tight">CodeHamr UI</span>
+      <header
+        className={`titlebar flex h-10 shrink-0 items-center gap-1 border-b border-zinc-800 px-2 ${
+          isMac ? 'pl-20' : '' // clear the traffic lights
+        } ${isWin ? 'pr-[140px]' : ''}`} // clear the caption buttons
+      >
+        <span className="px-2 text-sm font-semibold tracking-tight text-zinc-300 select-none">
+          CodeHamr UI
+        </span>
         {tabs.map((dir) => (
           <div
             key={dir}

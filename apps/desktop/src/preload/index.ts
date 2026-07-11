@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AgentEvent, Command, ConfigFile, PermissionMode } from '@codehamr-ui/protocol'
 
 const api = {
+  /** Host platform, so the custom title bar can reserve space for the native
+   *  window controls (mac traffic lights on the left, Windows caption buttons
+   *  on the right). */
+  platform: process.platform,
   /**
    * Absolute path of a dropped File. Electron removed the `File.path`
    * property in v32; webUtils is the supported replacement and must be

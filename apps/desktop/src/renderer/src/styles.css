@@ -1,5 +1,18 @@
 @import 'tailwindcss';
 
+/* Custom title bar (App.tsx <header>): the bar itself is an OS window-drag
+   region; interactive children opt back out so clicks/typing still work. */
+.titlebar {
+  -webkit-app-region: drag;
+}
+.titlebar button,
+.titlebar input,
+.titlebar select,
+.titlebar a,
+.titlebar .no-drag {
+  -webkit-app-region: no-drag;
+}
+
 /* Thin, subtle scrollbars that reveal on hover instead of the chunky
    always-on Chromium/Windows default. Overlay-style: the thumb is invisible
    until you hover the scrollable area, then fades in; darker while grabbed. */
