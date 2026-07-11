@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Workspace from './Workspace'
+import { Logo } from './Logo'
 
 /** Last path segment, for tab labels. */
 const basename = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p
@@ -58,8 +59,9 @@ export default function App(): React.JSX.Element {
           isMac ? 'pl-20' : '' // clear the traffic lights
         } ${isWin ? 'pr-[140px]' : ''}`} // clear the caption buttons
       >
-        <span className="px-2 text-sm font-semibold tracking-tight text-zinc-300 select-none">
-          CodeHamr UI
+        <span className="flex items-center gap-1.5 px-2 text-sm font-semibold tracking-tight text-zinc-200 select-none">
+          <Logo className="h-5 w-5 shrink-0" />
+          CodeAnvil
         </span>
         {tabs.map((dir) => (
           <div

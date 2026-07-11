@@ -2,7 +2,7 @@
   "name": "@codehamr-ui/desktop",
   "version": "0.2.1",
   "private": true,
-  "description": "CodeHamr UI — desktop coding harness",
+  "description": "CodeAnvil — desktop coding harness",
   "author": "mashdup",
   "main": "./out/main/index.js",
   "scripts": {
