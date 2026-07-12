@@ -141,6 +141,23 @@ function resolveBinary(): string {
   return exe // rely on PATH
 }
 
+/**
+ * Absolute path to the bundled POSIX shell for the bash tool (Windows only),
+ * so a packaged app doesn't require Git for Windows. busybox-w32 shipped as
+ * sh.exe; fetched into apps/desktop/build/shell by `npm run fetch:busybox` and
+ * packaged to resources/shell by electron-builder. Returns null when absent
+ * (e.g. dev without a fetch, or non-Windows) — the agent then falls back to
+ * Git Bash on PATH.
+ */
+function resolveShell(): string | null {
+  if (process.platform !== 'win32') return null
+  const candidates = app.isPackaged
+    ? [join(process.resourcesPath, 'shell', 'sh.exe')]
+    : [join(app.getAppPath(), 'build', 'shell', 'sh.exe')]
+  for (const p of candidates) if (existsSync(p)) return p
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // Config presets: named endpoint configs stored app-globally (userData), so
 // one saved setup follows the user across every project. The one marked
@@ -451,6 +468,7 @@ function wireIpc(): void {
     }
     const session = new AgentSession({
       binaryPath: resolveBinary(),
+      shellPath: resolveShell(),
       cwd,
       onEvent: (event) => win?.webContents.send('agent:event', { cwd, event }),
       onNoise: (line) => {
@@ -708,13 +726,23 @@ function wireIpc(): void {
   ipcMain.handle('models:scan', async (_evt, url: string, key: string) => {
     const base = String(url).trim().replace(/\/+$/, '')
     if (!base) throw new Error('enter an endpoint URL first')
+    // Mirror the agent's endpoint rule: a base with its own path (a provider
+    // rooted at e.g. /api/paas/v4) gets /models appended; a bare host gets the
+    // conventional /v1/models.
+    let hasPath = false
+    try {
+      hasPath = new URL(base).pathname.replace(/\/+$/, '') !== ''
+    } catch {
+      /* unparseable URL — treat as a bare host */
+    }
+    const modelsUrl = `${base}${hasPath ? '' : '/v1'}/models`
     // Expand a whole-key ${VAR} reference against the env, matching the agent.
     const trimmedKey = String(key).trim()
     const m = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(trimmedKey)
     const resolvedKey = m ? (process.env[m[1]] ?? '') : trimmedKey
     let res: Response
     try {
-      res = await fetch(`${base}/v1/models`, {
+      res = await fetch(modelsUrl, {
         headers: resolvedKey ? { Authorization: `Bearer ${resolvedKey}` } : {},
         signal: AbortSignal.timeout(10_000),
       })
@@ -722,7 +750,7 @@ function wireIpc(): void {
       throw new Error(`could not reach ${base} (${(e as Error).message})`)
     }
     if (!res.ok) {
-      throw new Error(`${base}/v1/models returned ${res.status} ${res.statusText}`)
+      throw new Error(`${modelsUrl} returned ${res.status} ${res.statusText}`)
     }
     const json = (await res.json()) as { data?: { id?: string }[] }
     const ids = Array.isArray(json.data)

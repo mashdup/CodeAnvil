@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { highlight } from './syntax'
-import type { AgentEvent, ModelProfile, PermissionMode } from '@codehamr-ui/protocol'
+import type { AgentEvent, ModelProfile, PermissionMode, TurnDoneEvent } from '@codehamr-ui/protocol'
 import { PROTOCOL_VERSION } from '@codehamr-ui/protocol'
 import { AppearanceModal, SettingsPanel } from './Settings'
 import { FileTree } from './FileTree'
@@ -82,6 +82,30 @@ const MAX_INLINE_CHARS = 60_000 // ~15k tokens; the rest is a read_file away
 /** Last path segment, for the auto-mode banner and file chips. */
 const basename = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p
 
+/** Human status line for a running tool: what it's doing, not just its name. */
+function toolLabel(name: string, args: Record<string, unknown>): string {
+  const file = (p: unknown): string => (typeof p === 'string' && p ? basename(p) : '')
+  const clip = (s: string, n = 44): string => (s.length > n ? s.slice(0, n) + '…' : s)
+  switch (name) {
+    case 'bash': {
+      const cmd = typeof args.cmd === 'string' ? args.cmd : typeof args.command === 'string' ? args.command : ''
+      return cmd ? `running: ${clip(cmd.replace(/\s+/g, ' ').trim())}` : 'running command'
+    }
+    case 'read_file':
+      return file(args.path) ? `reading ${file(args.path)}` : 'reading file'
+    case 'write_file':
+      return file(args.path) ? `writing ${file(args.path)}` : 'writing file'
+    case 'edit_file':
+      return file(args.path) ? `editing ${file(args.path)}` : 'editing file'
+    case 'preview_file':
+      return 'opening preview'
+    case 'preview_url':
+      return 'opening browser'
+    default:
+      return `running ${name}`
+  }
+}
+
 /** Panel width persisted app-wide so it survives restarts and new tabs. */
 function usePanelWidth(
   key: string,
@@ -104,6 +128,21 @@ function usePanelWidth(
 }
 
 /**
+ * A full-viewport transparent overlay held up for the duration of a divider
+ * drag. Electron's <webview> (and any iframe) runs out-of-process and swallows
+ * mouse events the instant the cursor crosses it, which strands the drag's
+ * document-level listeners — the pointer "escapes" and the drag goes haywire.
+ * The shield sits on top so every move/up lands in this document instead, and
+ * carries the resize cursor across the whole window. Returns a remover.
+ */
+function beginDragShield(cursor: string): () => void {
+  const el = document.createElement('div')
+  el.style.cssText = `position:fixed;inset:0;z-index:9999;cursor:${cursor}`
+  document.body.appendChild(el)
+  return () => el.remove()
+}
+
+/**
  * Draggable vertical divider. `onResize` receives the incremental pointer
  * delta (px) since the last move; the parent clamps and applies it.
  */
@@ -111,6 +150,7 @@ function ResizeHandle({ onResize }: { onResize: (dx: number) => void }): React.J
   const onMouseDown = (e: React.MouseEvent): void => {
     e.preventDefault()
     let last = e.clientX
+    const removeShield = beginDragShield('col-resize')
     const move = (ev: MouseEvent): void => {
       onResize(ev.clientX - last)
       last = ev.clientX
@@ -118,6 +158,7 @@ function ResizeHandle({ onResize }: { onResize: (dx: number) => void }): React.J
     const up = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      removeShield()
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
@@ -139,6 +180,7 @@ function RowResizeHandle({ onResize }: { onResize: (dy: number) => void }): Reac
   const onMouseDown = (e: React.MouseEvent): void => {
     e.preventDefault()
     let last = e.clientY
+    const removeShield = beginDragShield('row-resize')
     const move = (ev: MouseEvent): void => {
       onResize(ev.clientY - last)
       last = ev.clientY
@@ -146,6 +188,7 @@ function RowResizeHandle({ onResize }: { onResize: (dy: number) => void }): Reac
     const up = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      removeShield()
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
@@ -337,6 +380,15 @@ export default function Workspace({
     setTreeReload((prev) => ({ dirs, nonce: (prev?.nonce ?? 0) + 1 }))
   }, [])
   const [viewer, setViewer] = useState<Preview | null>(null)
+  const [lastInference, setLastInference] = useState<{
+    promptTokens: number
+    completionTokens: number
+    durationMs?: number // wall-clock of the last response's generation, for tok/s
+  } | null>(null)
+  // Time the last assistant generation (first content token → assistant_done)
+  // in refs, so the readout doesn't cost a re-render per token.
+  const genStartRef = useRef<number | null>(null)
+  const lastGenMsRef = useRef<number | null>(null)
   // Mirror the open file's path in a ref so the fs-change effect can re-read it
   // without depending on `viewer` (which would resubscribe on every open).
   const viewerPathRef = useRef<string | null>(null)
@@ -436,6 +488,13 @@ export default function Workspace({
   const [runningTool, setRunningTool] = useState<string>('')
   const [turnStart, setTurnStart] = useState<number | null>(null)
   const [elapsed, setElapsed] = useState(0)
+  // Richer progress: agentic round number, live generation meter, and per-round
+  // prefill timing (time-to-first-token). Refs for the hot path (per token).
+  const [step, setStep] = useState(0)
+  const [streamMeter, setStreamMeter] = useState<{ tokens: number; tokPerSec: number } | null>(null)
+  const genCharsRef = useRef(0) // chars streamed in the current generation (≈ tokens×4)
+  const prefillMsRef = useRef<number | null>(null) // time-to-first-token of the current round
+  const roundStartRef = useRef<number | null>(null) // when the current round's wait began
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const push = useCallback((item: Item) => {
@@ -452,6 +511,11 @@ export default function Workspace({
     setPhase('idle')
     setRunningTool('')
     setTurnStart(null)
+    setStep(0)
+    setStreamMeter(null)
+    genCharsRef.current = 0
+    prefillMsRef.current = null
+    roundStartRef.current = null
     // Freeze any still-streaming bubbles so the caret stops blinking.
     setItems((prev) =>
       prev.map((it) =>
@@ -544,6 +608,13 @@ export default function Workspace({
           })
           break
         case 'assistant_delta':
+          if (genStartRef.current === null) {
+            genStartRef.current = Date.now() // first content token
+            genCharsRef.current = 0
+            setStep((s) => s + 1) // a new agentic round's response has begun
+            if (roundStartRef.current !== null) prefillMsRef.current = Date.now() - roundStartRef.current
+          }
+          genCharsRef.current += event.text.length
           setPhase('streaming')
           setItems((prev) => {
             // Answer tokens end the thinking display: collapse the reasoning
@@ -559,6 +630,11 @@ export default function Workspace({
           })
           break
         case 'assistant_done':
+          if (genStartRef.current !== null) {
+            lastGenMsRef.current = Date.now() - genStartRef.current
+            genStartRef.current = null
+          }
+          setStreamMeter(null)
           setItems((prev) =>
             prev.map((it) =>
               (it.kind === 'assistant' || it.kind === 'reasoning') && it.streaming
@@ -569,7 +645,7 @@ export default function Workspace({
           break
         case 'tool_call':
           setPhase('tool')
-          setRunningTool(event.name)
+          setRunningTool(toolLabel(event.name, event.args))
           setItems((prev) => [
             ...prev,
             {
@@ -585,6 +661,7 @@ export default function Workspace({
           // Round-trip continues: next LLM round follows, so back to waiting.
           setPhase('waiting')
           setRunningTool('')
+          roundStartRef.current = Date.now() // the next round's wait (prefill) begins now
           setItems((prev) =>
             prev.map((it) =>
               it.kind === 'tool' && it.id === event.callId
@@ -594,6 +671,11 @@ export default function Workspace({
           )
           break
         case 'turn_done':
+          // Keep the last stat when a turn ends without usage (cancel, or an
+          // endpoint that doesn't report it) — only overwrite on a real number.
+          if (event.usage)
+            setLastInference({ ...event.usage, durationMs: lastGenMsRef.current ?? undefined })
+          genStartRef.current = null
           endTurn()
           break
         case 'error':
@@ -670,9 +752,18 @@ export default function Workspace({
   }, [busy, refreshGitStat])
 
   // Elapsed ticker for the status bar: proof of life while the model is silent.
+  // Also refreshes the live generation meter (token estimate + tok/s) once a
+  // second, off the per-token hot path.
   useEffect(() => {
     if (turnStart === null) return
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - turnStart) / 1000)), 1000)
+    const t = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - turnStart) / 1000))
+      if (genStartRef.current !== null) {
+        const ms = Date.now() - genStartRef.current
+        const tokens = Math.round(genCharsRef.current / 4) // ~4 chars/token estimate
+        setStreamMeter({ tokens, tokPerSec: ms > 500 ? Math.round(tokens / (ms / 1000)) : 0 })
+      }
+    }, 1000)
     return () => clearInterval(t)
   }, [turnStart])
 
@@ -909,6 +1000,11 @@ export default function Workspace({
       setPhase('waiting')
       setTurnStart(Date.now())
       setElapsed(0)
+      setStep(0)
+      setStreamMeter(null)
+      genCharsRef.current = 0
+      prefillMsRef.current = null
+      roundStartRef.current = Date.now() // first round's wait (prefill) begins now
       // Transcript shows what you typed plus chips; the wire carries the
       // inlined file contents.
       push({
@@ -1691,6 +1787,9 @@ export default function Workspace({
               phase={awaitingApproval ? 'approval' : phase}
               tool={runningTool}
               elapsed={elapsed}
+              step={step}
+              streamMeter={streamMeter}
+              prefillMs={prefillMsRef.current}
               onCancel={() => void cancelTurn()}
             />
           )}
@@ -1792,6 +1891,27 @@ export default function Workspace({
                 </span>
               )}
               <div className="ml-auto flex items-center gap-2">
+                {lastInference && (
+                  <div
+                    className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"
+                    title={`last message — ${lastInference.promptTokens.toLocaleString()} prompt + ${lastInference.completionTokens.toLocaleString()} completion tokens`}
+                  >
+                    <span>
+                      {(lastInference.promptTokens + lastInference.completionTokens).toLocaleString()} tok
+                    </span>
+                    {!!lastInference.durationMs && lastInference.durationMs > 0 && (
+                      <>
+                        <span className="text-zinc-600">·</span>
+                        <span title="completion tokens per second (this response's generation)">
+                          {Math.round(
+                            lastInference.completionTokens / (lastInference.durationMs / 1000),
+                          ).toLocaleString()}{' '}
+                          tok/s
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
                 {models.length > 0 && (
                   <select
                     value={activeModel}
@@ -2172,17 +2292,49 @@ function StatusBar({
   phase,
   tool,
   elapsed,
+  step,
+  streamMeter,
+  prefillMs,
   onCancel,
 }: {
   phase: Phase | 'approval'
   tool: string
   elapsed: number
+  step: number
+  streamMeter: { tokens: number; tokPerSec: number } | null
+  prefillMs: number | null
   onCancel: () => void
 }): React.JSX.Element {
-  const mins = Math.floor(elapsed / 60)
-  const secs = elapsed % 60
-  const clock = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
-  const label = phase === 'tool' && tool ? `running ${tool}` : phaseText[phase]
+  const clock = elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`
+  const num = (n: number): string => n.toLocaleString()
+
+  let label: string
+  if (phase === 'tool') {
+    // Contextual tool line, e.g. "reading api.ts" / "running: npm test".
+    label = tool || 'running tool'
+  } else if (phase === 'streaming') {
+    // Prefill/gen split + live generation meter.
+    const parts: string[] = []
+    if (prefillMs != null) parts.push(`prefill ${(prefillMs / 1000).toFixed(1)}s ·`)
+    parts.push('generating')
+    if (streamMeter && streamMeter.tokens > 0) {
+      parts.push(`· ~${num(streamMeter.tokens)} tok`)
+      if (streamMeter.tokPerSec > 0) parts.push(`· ~${num(streamMeter.tokPerSec)} tok/s`)
+    }
+    label = parts.join(' ')
+  } else if (phase === 'waiting') {
+    // Reassurance escalation once a silent local model has run a while.
+    label =
+      elapsed >= 20
+        ? 'still working — large prompts can take a while on local models; Cancel anytime'
+        : 'waiting for the model — local models can be silent during prefill'
+  } else {
+    label = phaseText[phase]
+  }
+
+  // Step badge for multi-round agentic turns (hidden for a simple single reply).
+  const showStep = step >= 1 && (phase === 'tool' || step >= 2)
+
   return (
     <div className="flex items-center gap-2 border-t border-zinc-800 bg-zinc-900/70 px-4 py-1.5 text-xs text-zinc-400">
       <span
@@ -2190,6 +2342,11 @@ function StatusBar({
           phase === 'approval' ? 'bg-amber-400' : 'bg-emerald-500'
         }`}
       />
+      {showStep && (
+        <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-300">
+          step {step}
+        </span>
+      )}
       <span className="truncate">{label}</span>
       <span className="ml-auto shrink-0 tabular-nums">{clock}</span>
       <button

@@ -136,7 +136,7 @@ active: local                 # which profile to use
 models:
   local:
     llm: gemma                 # model id sent as `model` on the wire
-    url: https://…             # OpenAI-compatible base, WITHOUT /v1
+    url: https://…             # bare host → /v1 auto-appended; or a full path (e.g. /api/paas/v4)
     key: ${MY_KEY}             # ${VAR} expands from env; keeps secrets off disk
     context_size: 32768        # optional; the server X-Context-Window wins
 logging: false                 # optional
@@ -193,11 +193,13 @@ Run from the repo root:
   `styles.css`) — dark-on-dark for dark themes, light-on-light for light themes —
   so syntax and diffs stay readable regardless of the user's accent/surface tint.
   Don't swap these for themed `zinc`/`emerald` classes.
-- **LLM endpoints must be OpenAI-compatible and serve `/v1/chat/completions`.**
-  The Go client (`codehamr/internal/llm/llm.go`) hardcodes `<url>/v1/chat/
-  completions`; the config `url` is the base *before* `/v1`. Providers that use a
-  different path (e.g. Z.ai's `/api/paas/v4`) 404 and need a gateway (OpenRouter)
-  or a client change.
+- **LLM endpoints must be OpenAI-compatible.** The Go client
+  (`codehamr/internal/llm/llm.go`) resolves the endpoint from the config `url`: a
+  bare host gets `/v1/chat/completions` appended (Ollama, most setups), but a
+  `url` that already carries a path — a provider not rooted at `/v1`, e.g. Z.ai's
+  `.../api/paas/v4` — gets only `/chat/completions` appended, honouring that path.
+  So for a custom cloud endpoint, put the full base *including* its version
+  segment in `url`. `models:scan` follows the same rule.
 - **Windows/Go runtime.** The agent is built with `GOEXPERIMENT=nogreenteagc`
   and spawned with `GODEBUG=asyncpreemptoff=1` to avoid a Go GC/unwind crash on
   recent Windows kernels. Keep both when touching the spawn path or build script.

@@ -94,8 +94,10 @@ there (edit it via the ⚙ panel). Point a profile at local Ollama, any
 OpenAI-compatible endpoint, or HamrPass. Image drop needs a vision model behind
 the endpoint; on a text-only model the app degrades gracefully.
 
-> Note: LLM endpoints must be OpenAI-compatible and serve `/v1/chat/completions`
-> (the config `url` is the base *before* `/v1`).
+> Note: LLM endpoints must be OpenAI-compatible. A bare-host `url` gets
+> `/v1/chat/completions` appended; a `url` with its own path (e.g.
+> `https://api.z.ai/api/paas/v4`) is used as-is with `/chat/completions`, so
+> custom cloud endpoints work without a gateway.
 
 ## Packaging & releases
 

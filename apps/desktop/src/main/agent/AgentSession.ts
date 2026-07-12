@@ -21,6 +21,12 @@ export interface AgentSessionOptions {
   binaryPath: string
   /** Workspace directory the agent runs in (where .codehamr/ lives). */
   cwd: string
+  /**
+   * Absolute path to a bundled POSIX shell (Windows only). When set, the agent
+   * uses it for the bash tool via CODEHAMR_SHELL, so a packaged app needs no
+   * Git for Windows. Null/absent → the agent falls back to Git Bash on PATH.
+   */
+  shellPath?: string | null
   onEvent: (event: AgentEvent) => void
   /** Raw stdout lines that failed protocol parsing — logged, never fatal. */
   onNoise?: (line: string) => void
@@ -54,6 +60,8 @@ export class AgentSession {
         // async preemption is the other known trigger of bad-time unwinds on
         // Windows; the binary itself is built with GOEXPERIMENT=nogreenteagc.
         GODEBUG: 'asyncpreemptoff=1',
+        // Bundled POSIX shell for the bash tool (Windows), if we shipped one.
+        ...(this.opts.shellPath ? { CODEHAMR_SHELL: this.opts.shellPath } : {}),
       },
       windowsHide: true,
     })

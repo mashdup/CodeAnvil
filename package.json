@@ -12,7 +12,8 @@
     "build": "npm run build -w @codehamr-ui/protocol && npm run build -w @codehamr-ui/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "agent:build": "node scripts/build-agent.mjs",
-    "dist:win": "npm run agent:build && npm run build && npm run dist:win -w @codehamr-ui/desktop",
+    "fetch:busybox": "node scripts/fetch-busybox.mjs",
+    "dist:win": "npm run agent:build && npm run fetch:busybox && npm run build && npm run dist:win -w @codehamr-ui/desktop",
     "dist:mac": "npm run agent:build && npm run build && npm run dist:mac -w @codehamr-ui/desktop"
   }
 }

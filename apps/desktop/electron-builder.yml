@@ -26,6 +26,11 @@ win:
   extraResources:
     - from: ../../codehamr/dist/codehamr.exe
       to: agent/codehamr.exe
+    # Bundled POSIX shell for the bash tool, so a packaged app needs no Git for
+    # Windows. Fetched by `npm run fetch:busybox` (busybox-w32 as sh.exe) before
+    # packaging; the agent finds it via CODEHAMR_SHELL (see main's resolveShell).
+    - from: build/shell/sh.exe
+      to: shell/sh.exe
 nsis:
   oneClick: true
   perMachine: false

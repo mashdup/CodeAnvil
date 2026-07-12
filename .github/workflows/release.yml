@@ -37,6 +37,8 @@ jobs:
       - run: npm ci
       - name: build agent (GOEXPERIMENT=nogreenteagc)
         run: npm run agent:build
+      - name: fetch bundled shell (busybox-w32 → sh.exe)
+        run: npm run fetch:busybox
       - name: build app
         run: npm run build
       - name: package NSIS installer (build only)
