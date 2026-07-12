@@ -17,7 +17,23 @@ interface WebviewEl extends HTMLElement {
   goBack(): void
   goForward(): void
   reload(): void
+  insertCSS(css: string): Promise<string>
 }
+
+// Thin, rounded, semi-transparent scrollbar injected into every previewed
+// page — replaces the chunky default OS scrollbar (very obvious on Windows).
+// The neutral translucent thumb reads fine over both light and dark pages and
+// only touches the scrollbar, leaving the page's own styling untouched.
+const SCROLLBAR_CSS = `
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{
+  background:rgba(120,120,130,.45);
+  border-radius:8px;
+  border:2px solid transparent;
+  background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:rgba(140,140,150,.75);background-clip:content-box}
+::-webkit-scrollbar-corner{background:transparent}`
 
 const storageKey = (cwd: string): string => `chbrowser:${cwd}`
 
@@ -123,6 +139,15 @@ export function BrowserPane({
       }
     }
     const onStart = (): void => setFailed(null)
+    // Re-inject the scrollbar style on every page load — a full navigation
+    // swaps the document, so CSS from the previous page is gone.
+    const onReady = (): void => {
+      try {
+        void wv.insertCSS(SCROLLBAR_CSS)
+      } catch {
+        /* not attached yet */
+      }
+    }
     const onFail = (e: Event): void => {
       // did-fail-load also fires for aborted subframe loads (code -3); only
       // surface main-frame failures.
@@ -134,11 +159,13 @@ export function BrowserPane({
     wv.addEventListener('did-navigate', onNav)
     wv.addEventListener('did-navigate-in-page', onNav)
     wv.addEventListener('did-start-loading', onStart)
+    wv.addEventListener('dom-ready', onReady)
     wv.addEventListener('did-fail-load', onFail)
     return () => {
       wv.removeEventListener('did-navigate', onNav)
       wv.removeEventListener('did-navigate-in-page', onNav)
       wv.removeEventListener('did-start-loading', onStart)
+      wv.removeEventListener('dom-ready', onReady)
       wv.removeEventListener('did-fail-load', onFail)
     }
   }, [cwd])

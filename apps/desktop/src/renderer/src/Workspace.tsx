@@ -1892,6 +1892,13 @@ export default function Workspace({
               )}
               <div className="ml-auto flex items-center gap-2">
                 {lastInference && (
+                  <ContextMeter
+                    models={models}
+                    activeModel={activeModel}
+                    promptTokens={lastInference.promptTokens}
+                  />
+                )}
+                {lastInference && (
                   <div
                     className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"
                     title={`last message — ${lastInference.promptTokens.toLocaleString()} prompt + ${lastInference.completionTokens.toLocaleString()} completion tokens`}
@@ -2272,6 +2279,43 @@ function VisionHint({
         ? `image will be sent to ${llm}`
         : `heads-up: "${llm}" doesn't look like a vision model — it may ignore or reject the image`}
     </span>
+  )
+}
+
+/**
+ * ContextMeter shows how full the active model's context window is, using the
+ * prompt-token count of the last turn (what the agent actually packed and
+ * sent) against the model's configured contextSize. A thin bar plus a
+ * percentage; it warns-tones as the window fills so a compact/clear is an
+ * obvious next move before the agent starts trimming history.
+ */
+function ContextMeter({
+  models,
+  activeModel,
+  promptTokens,
+}: {
+  models: ModelProfile[]
+  activeModel: string
+  promptTokens: number
+}): React.JSX.Element | null {
+  const contextSize = models.find((m) => m.name === activeModel)?.contextSize ?? 0
+  if (!contextSize || promptTokens <= 0) return null
+  const ratio = Math.min(promptTokens / contextSize, 1)
+  const pct = Math.round(ratio * 100)
+  const tone =
+    ratio >= 0.9 ? 'text-red-400' : ratio >= 0.75 ? 'text-amber-400' : 'text-zinc-500'
+  const barColor =
+    ratio >= 0.9 ? 'bg-red-500' : ratio >= 0.75 ? 'bg-amber-500' : 'bg-zinc-500'
+  return (
+    <div
+      className={`flex items-center gap-1.5 font-mono text-[10px] ${tone}`}
+      title={`context window — ${promptTokens.toLocaleString()} of ${contextSize.toLocaleString()} tokens (${pct}%) used by the last prompt`}
+    >
+      <div className="h-1.5 w-10 overflow-hidden rounded-full bg-zinc-800">
+        <div className={`h-full ${barColor}`} style={{ width: `${Math.max(pct, 2)}%` }} />
+      </div>
+      <span>{pct}%</span>
+    </div>
   )
 }
 
