@@ -1,6 +1,6 @@
 {
   "name": "@codehamr-ui/desktop",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "CodeAnvil — desktop coding harness",
   "author": "mashdup",
@@ -11,6 +11,7 @@
     "start": "electron-vite preview",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
