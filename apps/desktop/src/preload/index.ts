@@ -140,6 +140,14 @@ const api = {
     ipcRenderer.on('fs:changed', handler)
     return () => ipcRenderer.removeListener('fs:changed', handler)
   },
+  /** Fires when the workspace's .git metadata changes (commit, checkout, add,
+   *  external git operations) — signal to re-fetch git status/diff/gutter
+   *  markers, since none of that necessarily touches a tracked file's mtime. */
+  onGitChanged: (cb: (payload: { cwd: string }) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, payload: { cwd: string }): void => cb(payload)
+    ipcRenderer.on('git:changed', handler)
+    return () => ipcRenderer.removeListener('git:changed', handler)
+  },
   onUpdateReady: (cb: (version: string) => void): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, version: string): void => cb(version)
     ipcRenderer.on('app:update-ready', handler)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -49,10 +49,19 @@ export function FilePreview({
   // fetched lazily (null = unknown/not fetched, '' = no changes → toggle hidden).
   const [showDiff, setShowDiff] = useState(false)
   const [diff, setDiff] = useState<string | null>(null)
+  const [gitChanges, setGitChanges] = useState<
+    | {
+        added: Set<number>
+        modified: Set<number>
+        removedBefore: Set<number>
+      }
+    | null
+  >(null)
   useEffect(() => {
     setShowDiff(false)
     if (preview.kind !== 'text') {
       setDiff('')
+      setGitChanges(null)
       return
     }
     let cancelled = false
@@ -68,6 +77,46 @@ export function FilePreview({
       cancelled = true
     }
   }, [preview.kind === 'text' ? preview.path : preview.kind, preview.kind === 'text' ? preview.content : '', workspaceRoot])
+  // Per-line git change bars (gutter markers), used by CodeView in the File
+  // view (i.e. whenever showDiff is false). Fetched here — not gated on
+  // showDiff, since that's the view that actually renders them — and
+  // re-fetched below on refreshTick (commits, external edits, etc).
+  const fetchGitChanges = useCallback(() => {
+    if (preview.kind !== 'text') {
+      setGitChanges(null)
+      return
+    }
+    void window.codehamr
+      .gitFileChanges(workspaceRoot, preview.path)
+      .then((c) => {
+        setGitChanges(
+          c
+            ? {
+                added: new Set(c.added),
+                modified: new Set(c.modified),
+                removedBefore: new Set(c.removedBefore),
+              }
+            : null,
+        )
+      })
+      .catch(() => setGitChanges(null))
+  }, [preview.kind, preview.kind === 'text' ? preview.path : '', workspaceRoot])
+  useEffect(() => {
+    fetchGitChanges()
+  }, [fetchGitChanges])
+  // Refresh the diff and gutter markers whenever the working tree's git state
+  // changes (commit, external checkout/add, etc.) — not just when this file's
+  // own directory changes on disk, since a commit touches only .git/.
+  useEffect(() => {
+    return window.codehamr.onGitChanged(({ cwd: changedCwd }) => {
+      if (changedCwd !== workspaceRoot || preview.kind !== 'text') return
+      fetchGitChanges()
+      void window.codehamr
+        .gitFileDiff(workspaceRoot, preview.path)
+        .then((d) => setDiff(d ?? ''))
+        .catch(() => setDiff(''))
+    })
+  }, [workspaceRoot, preview.kind, preview.kind === 'text' ? preview.path : '', fetchGitChanges])
   const hasDiff = preview.kind === 'text' && !!diff
 
   return (
@@ -141,6 +190,7 @@ export function FilePreview({
           <Body
             preview={preview}
             workspaceRoot={workspaceRoot}
+            gitChanges={gitChanges}
             onUseInPrompt={onUseInPrompt}
             wrap={wrap}
           />
@@ -187,11 +237,19 @@ function DiffView({ diff }: { diff: string }): React.JSX.Element {
 function Body({
   preview,
   workspaceRoot,
+  gitChanges,
   onUseInPrompt,
   wrap,
 }: {
   preview: Preview
   workspaceRoot: string
+  gitChanges:
+    | {
+        added: Set<number>
+        modified: Set<number>
+        removedBefore: Set<number>
+      }
+    | null
   onUseInPrompt: (snippet: string) => void
   wrap: boolean
 }): React.JSX.Element {
@@ -202,6 +260,7 @@ function Body({
           content={preview.content}
           path={preview.path}
           workspaceRoot={workspaceRoot}
+          gitChanges={gitChanges}
           onUseInPrompt={onUseInPrompt}
           wrap={wrap}
         />
@@ -279,12 +338,20 @@ function CodeView({
   content,
   path,
   workspaceRoot,
+  gitChanges,
   onUseInPrompt,
   wrap,
 }: {
   content: string
   path: string
   workspaceRoot: string
+  gitChanges:
+    | {
+        added: Set<number>
+        modified: Set<number>
+        removedBefore: Set<number>
+      }
+    | null
   onUseInPrompt: (snippet: string) => void
   wrap: boolean
 }): React.JSX.Element {
@@ -294,35 +361,8 @@ function CodeView({
 
   // Per-line git change status vs HEAD, for the gutter change bar (like an
   // editor). Re-fetched when the file or its content changes (live refresh).
-  const [gitChanges, setGitChanges] = useState<{
-    added: Set<number>
-    modified: Set<number>
-    removedBefore: Set<number>
-  } | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    void window.codehamr
-      .gitFileChanges(workspaceRoot, path)
-      .then((c) => {
-        if (cancelled) return
-        setGitChanges(
-          c
-            ? {
-                added: new Set(c.added),
-                modified: new Set(c.modified),
-                removedBefore: new Set(c.removedBefore),
-              }
-            : null,
-        )
-      })
-      .catch(() => {
-        if (!cancelled) setGitChanges(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [path, content, workspaceRoot])
-  // Marker class for a line's gutter, from its git change status.
+  // We do NOT re-fetch here; the parent (FilePreview) fetches it and passes
+  // it down. This keeps the refresh in sync with the Diff/File toggle.
   const changeClass = (n: number): string => {
     if (!gitChanges) return ''
     if (gitChanges.added.has(n)) return 'ch-git-added'

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 /** Per-file working-tree git status, keyed by normalized absolute path. */
 export type GitChangeKind = 'modified' | 'added' | 'untracked'
@@ -43,5 +43,15 @@ export function useGitStatus(cwd: string): GitStatus {
       })
     }, 250)
   }, [cwd])
+  // .git metadata churn (commit, checkout, external `git add`/`git commit`)
+  // doesn't necessarily touch any tracked file's own mtime, so the tree's
+  // fs-change watcher (which ignores .git/) never catches it on its own —
+  // without this, the file tree and preview's change indicators go stale
+  // right after a commit until something else happens to trigger a refresh.
+  useEffect(() => {
+    return window.codehamr.onGitChanged(({ cwd: changedCwd }) => {
+      if (changedCwd === cwd) refreshGitStat()
+    })
+  }, [cwd, refreshGitStat])
   return { currentBranch, diffStats, changedPaths, refreshGitStat }
 }

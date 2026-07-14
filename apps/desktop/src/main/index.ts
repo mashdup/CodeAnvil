@@ -19,6 +19,7 @@ import electronUpdater from 'electron-updater'
 import { Command, ConfigFile } from '@codehamr-ui/protocol'
 import { AgentSession } from './agent/AgentSession'
 import { OAuthManager, type ProviderId } from './auth/OAuth'
+import { fixShellPath } from './shellPath'
 
 const { autoUpdater } = electronUpdater
 
@@ -63,6 +64,7 @@ const watchIgnore = new Set([
 function startWatcher(cwd: string): void {
   if (watchers.has(cwd)) return // survives agent restarts; start once per tab
   let timer: NodeJS.Timeout | null = null
+  let gitTimer: NodeJS.Timeout | null = null
   // Absolute parent directories of changed entries, accumulated across the
   // debounce window. The renderer reloads ONLY these (if loaded), never the
   // whole tree — the difference between a targeted refresh and a storm of
@@ -75,6 +77,18 @@ function startWatcher(cwd: string): void {
       let parent = cwd
       if (filename) {
         const segs = String(filename).split(/[\\/]/)
+        if (segs[0] === '.git') {
+          // Index/HEAD/refs churn (commit, checkout, add) doesn't touch any
+          // tracked file's own directory, so it'd never trigger a tree reload
+          // or a git-status refresh otherwise — the change indicators and
+          // diff badges would go stale after every commit. Ping a dedicated,
+          // debounced git:changed signal instead of the tree-reload one.
+          if (gitTimer) clearTimeout(gitTimer)
+          gitTimer = setTimeout(() => {
+            win?.webContents.send('git:changed', { cwd })
+          }, 300)
+          return
+        }
         if (segs.some((s) => watchIgnore.has(s))) return
         segs.pop() // drop the entry name, keep its directory
         parent = segs.length ? join(cwd, ...segs) : cwd
@@ -1157,6 +1171,7 @@ function wireAutoUpdate(): void {
 }
 
 app.whenReady().then(() => {
+  fixShellPath()
   wireIpc()
   wireAutoUpdate()
   createWindow()
