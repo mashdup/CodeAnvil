@@ -192,22 +192,6 @@ export default function Workspace({
     if (!busy) refreshGitStat()
   }, [busy, refreshGitStat])
 
-  // Elapsed ticker for the status bar: proof of life while the model is silent.
-  // Also refreshes the live generation meter (token estimate + tok/s) once a
-  // second, off the per-token hot path.
-  useEffect(() => {
-    if (turnStart === null) return
-    const t = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - turnStart) / 1000))
-      if (genStartRef.current !== null) {
-        const ms = Date.now() - genStartRef.current
-        const tokens = Math.round(genCharsRef.current / 4) // ~4 chars/token estimate
-        setStreamMeter({ tokens, tokPerSec: ms > 500 ? Math.round(tokens / (ms / 1000)) : 0 })
-      }
-    }, 1000)
-    return () => clearInterval(t)
-  }, [turnStart])
-
   useEffect(() => {
     if (!userScrolledUpRef.current) {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
