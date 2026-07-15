@@ -26,6 +26,7 @@ import { useInputMenu } from './workspace/useInputMenu'
 import { useMessageMenu } from './workspace/useMessageMenu'
 import { useScrollManager } from './workspace/useScrollManager'
 import { useSessionState } from './workspace/useSessionState'
+import { useMenuDismiss, useMenuDismissDeferred } from './workspace/useMenuDismiss'
 import { useSlashCommands } from './workspace/useSlashCommands'
 import { useSearch } from './workspace/useSearch'
 import { TREE_MIN, TREE_MAX, PREVIEW_MIN } from './workspace/layout'
@@ -64,7 +65,6 @@ export default function Workspace({
   } | null>(null)
   // Time the last assistant generation (first content token → assistant_done)
   // in refs, so the readout doesn't cost a re-render per token.
-  const genStartRef = useRef<number | null>(null)
   const lastGenMsRef = useRef<number | null>(null)
   /** Resolve a tool-arg path (usually workspace-relative) to absolute. */
   const toAbs = useCallback(
@@ -147,6 +147,7 @@ export default function Workspace({
     genCharsRef,
     prefillMsRef,
     roundStartRef,
+    genStartRef,
     endTurn,
   } = useSessionState(setItems)
   const {
@@ -507,32 +508,11 @@ export default function Workspace({
   })
 
   // Any click or Escape dismisses the composer clipboard menu.
-  useEffect(() => {
-    if (!inputMenu) return
-    const close = (): void => setInputMenu(null)
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') close()
-    }
-    window.addEventListener('click', close)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('click', close)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [inputMenu])
+  useMenuDismiss(inputMenu, setInputMenu)
 
   // Clicking anywhere else closes the compact-bar burger menu. The toggle
   // button's own click fires first (bubbles later), so this runs after it.
-  useEffect(() => {
-    if (!barMenuOpen) return
-    const close = (): void => setBarMenuOpen(false)
-    // Defer so the opening click doesn't immediately close it.
-    const id = window.setTimeout(() => window.addEventListener('click', close), 0)
-    return () => {
-      window.clearTimeout(id)
-      window.removeEventListener('click', close)
-    }
-  }, [barMenuOpen])
+  useMenuDismissDeferred(barMenuOpen, setBarMenuOpen)
 
   // Drop-overlay safety net. The depth-counted enter/leave handlers on the
   // container clear the overlay in the normal case, but a drag can end without
