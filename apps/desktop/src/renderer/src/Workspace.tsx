@@ -1101,11 +1101,7 @@ export default function Workspace({
                   activeModel={activeModel}
                   promptTokens={lastInference?.promptTokens ?? 0}
                   contextWindow={lastInference?.contextWindow ?? 0}
-                  lastTotalTokens={
-                    lastInference
-                      ? lastInference.promptTokens + lastInference.completionTokens
-                      : 0
-                  }
+                  lastCompletionTokens={lastInference?.completionTokens ?? 0}
                 />
                 {lastInference && (
                   <div

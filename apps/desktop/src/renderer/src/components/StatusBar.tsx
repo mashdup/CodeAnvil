@@ -44,13 +44,14 @@ export function ContextMeter({
   activeModel,
   promptTokens,
   contextWindow,
-  lastTotalTokens,
+  lastCompletionTokens,
 }: {
   models: ModelProfile[]
   activeModel: string
   promptTokens: number
   contextWindow: number
-  lastTotalTokens?: number
+  /** Tokens the model generated on the last turn (the completion only). */
+  lastCompletionTokens?: number
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -103,9 +104,9 @@ export function ContextMeter({
           <div className="text-zinc-400">
             {promptTokens.toLocaleString()} / {denom.toLocaleString()} tokens
           </div>
-          {lastTotalTokens != null && lastTotalTokens > 0 && (
+          {lastCompletionTokens != null && lastCompletionTokens > 0 && (
             <div className="mt-0.5 text-zinc-500">
-              {lastTotalTokens.toLocaleString()} tokens last message
+              {lastCompletionTokens.toLocaleString()} tokens generated last turn
             </div>
           )}
           <div className="absolute left-1/2 top-full -mt-px h-1.5 w-1.5 -translate-x-1/2 rotate-45 border-b border-r border-zinc-700 bg-zinc-900" />

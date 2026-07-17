@@ -50,13 +50,19 @@ export function useTranscriptPersistence({
       // Only promptTokens + contextWindow are persisted (completionTokens/
       // durationMs are per-turn and would mislabel a restored value), so the
       // "last message" and tok/s readouts stay hidden until a real turn runs.
-      const stat = await window.codehamr.readContextStat(cwd)
-      if (stat && stat.promptTokens > 0) {
-        setLastInference({
-          promptTokens: stat.promptTokens,
-          completionTokens: 0,
-          contextWindow: stat.contextWindow,
-        })
+      // Wrapped so a failed/absent IPC handler can never block agent startup —
+      // this is a nice-to-have readout, not a boot dependency.
+      try {
+        const stat = await window.codehamr.readContextStat(cwd)
+        if (stat && stat.promptTokens > 0) {
+          setLastInference({
+            promptTokens: stat.promptTokens,
+            completionTokens: 0,
+            contextWindow: stat.contextWindow,
+          })
+        }
+      } catch {
+        // older main process without the handler, or read error — ignore
       }
       loadedRef.current = true
       const { seededFrom } = await window.codehamr.startAgent(cwd)
