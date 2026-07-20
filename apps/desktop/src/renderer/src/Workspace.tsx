@@ -56,6 +56,7 @@ export default function Workspace({
   const [connected, setConnected] = useState(false)
   const [activeModel, setActiveModel] = useState<string>('')
   const [models, setModels] = useState<ModelProfile[]>([])
+  const [reasoningEffort, setReasoningEffort] = useState<'low' | 'medium' | 'high'>('high')
   const [showSettings, setShowSettings] = useState(false)
   const [mode, setMode] = useState<PermissionMode>('ask')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -253,6 +254,14 @@ export default function Workspace({
     if (!busy) refreshGitStat()
   }, [busy, refreshGitStat])
 
+  // Sync reasoning effort from the active model's profile
+  useEffect(() => {
+    const profile = models.find((m) => m.name === activeModel)
+    if (profile?.reasoningEffort) {
+      setReasoningEffort(profile.reasoningEffort as 'low' | 'medium' | 'high')
+    }
+  }, [activeModel, models])
+
   useEffect(() => {
     if (!userScrolledUpRef.current) {
       scrollToBottom()
@@ -393,6 +402,7 @@ export default function Workspace({
     answerAsk,
     switchModel,
     switchMode,
+    switchReasoningEffort,
   } = useAgentCommands({
     cwd,
     sessionId,
@@ -1180,6 +1190,23 @@ export default function Workspace({
                         {m.name} · {m.llm}
                       </option>
                     ))}
+                  </select>
+                )}
+                {models.length > 0 && (
+                  <select
+                    value={reasoningEffort}
+                    onChange={(e) => {
+                      const effort = e.target.value as 'low' | 'medium' | 'high'
+                      setReasoningEffort(effort)
+                      void switchReasoningEffort(effort)
+                    }}
+                    disabled={busy}
+                    title={busy ? 'cannot switch reasoning effort mid-turn' : 'reasoning effort: how much thinking the model does before responding'}
+                    className="rounded bg-zinc-800 px-2 py-0.5 text-xs outline-none hover:bg-zinc-700 disabled:opacity-50"
+                  >
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
                   </select>
                 )}
                 <button

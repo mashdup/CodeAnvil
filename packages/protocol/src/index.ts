@@ -72,6 +72,13 @@ export const SetModeCommand = z.object({
   mode: PermissionMode,
 })
 
+/** Set reasoning effort (low/medium/high) for the active model. */
+export const SetReasoningEffortCommand = z.object({
+  v: z.literal(PROTOCOL_VERSION),
+  type: z.literal('set_reasoning_effort'),
+  effort: z.enum(['low', 'medium', 'high']),
+})
+
 /** The user's answer to an `ask_user` event: a chosen option index, or -1 with
  *  a typed `custom` answer. There is no cancel — the user always answers. */
 export const AskUserResponseCommand = z.object({
@@ -91,6 +98,7 @@ export const Command = z.discriminatedUnion('type', [
   ClearCommand,
   CompactCommand,
   SetModeCommand,
+  SetReasoningEffortCommand,
   AskUserResponseCommand,
 ])
 export type Command = z.infer<typeof Command>
@@ -104,6 +112,7 @@ export const ModelProfile = z.object({
   llm: z.string(),
   url: z.string(),
   contextSize: z.number().int().nonnegative(),
+  reasoningEffort: z.string().optional(),
 })
 export type ModelProfile = z.infer<typeof ModelProfile>
 
@@ -322,6 +331,7 @@ export const ConfigProfile = z.object({
   // Omitted (not 0) for server-managed profiles like hamrpass — the agent
   // coerces a missing value; a bogus one degrades packing.
   context_size: z.number().int().positive().optional(),
+  reasoning_effort: z.string().optional(),
 })
 export type ConfigProfile = z.infer<typeof ConfigProfile>
 

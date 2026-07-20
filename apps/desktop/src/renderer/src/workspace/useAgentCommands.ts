@@ -65,6 +65,7 @@ export function useAgentCommands({
   answerAsk: (selection: number, custom?: string) => Promise<void>
   switchModel: (name: string) => Promise<void>
   switchMode: (next: PermissionMode) => Promise<void>
+  switchReasoningEffort: (effort: 'low' | 'medium' | 'high') => Promise<void>
 } {
   const dispatchPrompt = useCallback(
     async (text: string, atts: Attachment[]): Promise<void> => {
@@ -175,6 +176,11 @@ export function useAgentCommands({
     await window.codehamr.send(cwd, { v: PROTOCOL_VERSION, type: 'set_mode', mode: next })
   }
 
+  const switchReasoningEffort = async (effort: 'low' | 'medium' | 'high'): Promise<void> => {
+    if (busy) return
+    await window.codehamr.send(cwd, { v: PROTOCOL_VERSION, type: 'set_reasoning_effort', effort })
+  }
+
   return {
     dispatchPrompt,
     cancelTurn,
@@ -182,5 +188,6 @@ export function useAgentCommands({
     answerAsk,
     switchModel,
     switchMode,
+    switchReasoningEffort,
   }
 }

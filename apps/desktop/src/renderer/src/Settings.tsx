@@ -23,6 +23,7 @@ interface ProfileRow {
   url: string
   key: string
   contextSize: string // free text while editing; parsed on save
+  reasoningEffort: string // 'low', 'medium', 'high', or '' (default/high)
   // Transient "scan endpoint for models" UI state (never persisted).
   scanning?: boolean
   scanned?: string[]
@@ -65,6 +66,7 @@ export function SettingsPanel({
         url: p.url,
         key: p.key ?? '',
         contextSize: p.context_size ? String(p.context_size) : '',
+        reasoningEffort: p.reasoning_effort ?? '',
       })),
     )
   }
@@ -123,7 +125,7 @@ export function SettingsPanel({
   const addProfile = (): void => {
     setRows((prev) => [
       ...(prev ?? []),
-      { name: `profile${(prev?.length ?? 0) + 1}`, llm: '', url: 'https://', key: '', contextSize: '128000' },
+      { name: `profile${(prev?.length ?? 0) + 1}`, llm: '', url: 'https://', key: '', contextSize: '128000', reasoningEffort: '' },
     ])
   }
 
@@ -145,7 +147,14 @@ export function SettingsPanel({
       if (ctx !== undefined && (!Number.isInteger(ctx) || ctx <= 0)) {
         return setError(`profile "${name}": context size must be a positive integer (or empty)`), null
       }
-      models[name] = { llm: r.llm.trim(), url: r.url.trim().replace(/\/+$/, ''), key: r.key, context_size: ctx }
+      const effort = r.reasoningEffort.trim() || undefined
+      models[name] = { 
+        llm: r.llm.trim(), 
+        url: r.url.trim().replace(/\/+$/, ''), 
+        key: r.key, 
+        context_size: ctx,
+        reasoning_effort: effort,
+      }
     }
     if (Object.keys(models).length === 0) return setError('at least one profile is required'), null
     return { active: models[active] ? active : Object.keys(models)[0], models }
@@ -450,6 +459,19 @@ export function SettingsPanel({
                   <Field label="endpoint url" value={r.url} onChange={(v) => update(i, { url: v })} placeholder="http://localhost:11434" />
                   <Field label="api key" value={r.key} onChange={(v) => update(i, { key: v })} placeholder="empty for local · ${VAR} for env" password />
                   <Field label="context size (empty = server-managed)" value={r.contextSize} onChange={(v) => update(i, { contextSize: v })} placeholder="32768" />
+                  <label className="block">
+                    <span className="mb-0.5 block text-[11px] text-zinc-500">reasoning effort</span>
+                    <select
+                      value={r.reasoningEffort}
+                      onChange={(e) => update(i, { reasoningEffort: e.target.value })}
+                      className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm outline-none focus:border-zinc-500"
+                    >
+                      <option value="">default (high)</option>
+                      <option value="low">low</option>
+                      <option value="medium">medium</option>
+                      <option value="high">high</option>
+                    </select>
+                  </label>
                     </>
                   )}
                 </div>
